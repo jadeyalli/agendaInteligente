@@ -1,5 +1,6 @@
-export default function KanbanPage() {
-  const Column = ({ title, className }: any) => (
+type ColumnProps = { title: string; className?: string };
+
+const Column = ({ title, className = '' }: ColumnProps) => (
     <div className={`bg-surface border border-ui rounded-xl p-3 ${className}`}>
       <h3 className="text-sm font-semibold mb-2">{title}</h3>
       <div className="space-y-2">
@@ -11,6 +12,7 @@ export default function KanbanPage() {
     </div>
   );
 
+export default function KanbanPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Tareas por prioridad</h1>

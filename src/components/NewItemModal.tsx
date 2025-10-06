@@ -1,29 +1,66 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Dispatch, SetStateAction, ReactNode } from 'react';
-
-type Priority = 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL';
+import { PRIORITIES, PRIORITY_STYLES, PRIORITY_LABELS, type Priority } from '@/lib/priorities';
 type TabKey = 'evento' | 'tarea' | 'disponibilidad';
 type Repeat = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 type AvailLabel = 'Pronto' | 'Esta semana' | 'Este mes' | 'Rango personalizado';
+export type WindowCode = 'PRONTO' | 'SEMANA' | 'MES' | 'RANGO' | 'NONE';
 
-const CATEGORIES = ['Escuela', 'Trabajo', 'Personal', 'Social', 'Otro'];
-const PRIORITIES: Priority[] = ['CRITICA', 'URGENTE', 'RELEVANTE', 'OPCIONAL'];
-const AVAIL_WINDOWS: AvailLabel[] = ['Pronto', 'Esta semana', 'Este mes', 'Rango personalizado'];
-
-const PRIORITY_STYLES = {
-  CRITICA: { bg: 'var(--critica)', color: '#fff' },
-  URGENTE: { bg: 'var(--urgente)', color: '#111827' },
-  RELEVANTE: { bg: 'var(--relevante)', color: '#fff' },
-  OPCIONAL: { bg: 'var(--opcional)', color: '#111827' },
+type ItemPayload = {
+  kind: 'EVENTO' | 'TAREA' | 'SOLICITUD';
+  title: string;
+  description: string | null;
+  category: string | null;
+  isInPerson: boolean;
+  canOverlap: boolean;
+  priority: Priority;
+  repeat: Repeat;
+  start?: string;
+  end?: string;
+  window?: WindowCode;
+  windowStart?: string;
+  windowEnd?: string;
+  status?: string;
+  shareLink?: string;
 };
 
-const WINDOW_MAP: Record<AvailLabel, 'PRONTO' | 'SEMANA' | 'MES' | 'RANGO'> = {
+export type EditableEvent = {
+  id: string;
+  kind: ItemPayload['kind'];
+  title: string;
+  description: string | null;
+  category: string | null;
+  isInPerson: boolean;
+  canOverlap: boolean;
+  priority: Priority;
+  repeat: Repeat;
+  start: string | null;
+  end: string | null;
+  window: WindowCode | null;
+  windowStart: string | null;
+  windowEnd: string | null;
+  status: string;
+  shareLink: string | null;
+};
+
+const CATEGORIES = ['Escuela', 'Trabajo', 'Personal', 'Social', 'Otro'];
+const AVAIL_WINDOWS: AvailLabel[] = ['Pronto', 'Esta semana', 'Este mes', 'Rango personalizado'];
+
+const WINDOW_MAP: Record<AvailLabel, WindowCode> = {
   'Pronto': 'PRONTO',
   'Esta semana': 'SEMANA',
   'Este mes': 'MES',
   'Rango personalizado': 'RANGO',
+};
+
+const WINDOW_REVERSE_MAP: Record<WindowCode, AvailLabel> = {
+  PRONTO: 'Pronto',
+  SEMANA: 'Esta semana',
+  MES: 'Este mes',
+  RANGO: 'Rango personalizado',
+  NONE: 'Pronto',
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -34,6 +71,33 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     </div>
   );
 }
+
+
+function toDateInput(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const tzOffset = date.getTimezoneOffset() * 60000;
+  const local = new Date(date.getTime() - tzOffset);
+  return local.toISOString().slice(0, 10);
+}
+
+function toTimeInput(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const tzOffset = date.getTimezoneOffset() * 60000;
+  const local = new Date(date.getTime() - tzOffset);
+  return local.toISOString().slice(11, 16);
+}
+
+type NewItemModalProps = {
+  open: boolean;
+  onClose: () => void;
+  onCreated?: () => void;
+  onUpdated?: () => void;
+  editingEvent?: EditableEvent | null;
+};
 
 /* ===================== Componentes compartidos ===================== */
 type PresencialidadProps = {
@@ -79,7 +143,7 @@ function PriorityControl({ priority, setPriority }: PriorityControlProps) {
               }`}
               style={{ background: styles.bg, color: styles.color }}
             >
-              {p[0] + p.slice(1).toLowerCase()}
+              {PRIORITY_LABELS[p]}
             </button>
           );
         })}
@@ -155,13 +219,24 @@ type DisponibilidadControlProps = {
   setRangeStart: Dispatch<SetStateAction<string>>;
   rangeEnd: string;
   setRangeEnd: Dispatch<SetStateAction<string>>;
+  title?: string;
+  helperText?: string;
 };
 
 function DisponibilidadControl(props: DisponibilidadControlProps) {
-  const { availWindow, setAvailWindow, rangeStart, setRangeStart, rangeEnd, setRangeEnd } = props;
+  const {
+    availWindow,
+    setAvailWindow,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
+    title = 'Disponibilidad',
+    helperText = 'El planificador buscará el mejor slot dentro de la ventana seleccionada.',
+  } = props;
 
   return (
-    <Section title="Disponibilidad">
+    <Section title={title}>
       <div className="space-y-2">
         <select
           value={availWindow}
@@ -191,9 +266,9 @@ function DisponibilidadControl(props: DisponibilidadControlProps) {
           </div>
         )}
       </div>
-      <p className="text-xs text-gray-500 mt-1">
-        El planificador buscará el mejor slot dentro de la ventana seleccionada.
-      </p>
+      {helperText && (
+        <p className="text-xs text-gray-500 mt-1">{helperText}</p>
+      )}
     </Section>
   );
 }
@@ -220,8 +295,36 @@ type CommonProps = {
   setRangeEnd: Dispatch<SetStateAction<string>>;
 };
 
-function EventoSection(props: CommonProps) {
-  const { inPerson, setInPerson, priority, setPriority, date, setDate, start, setStart, end, setEnd, repeat, setRepeat, availWindow, setAvailWindow, rangeStart, setRangeStart, rangeEnd, setRangeEnd } = props;
+type SchedulingSectionProps = CommonProps & {
+  waitlistMessage: string;
+  extraInfo?: ReactNode;
+};
+
+function SchedulingSection(props: SchedulingSectionProps) {
+  const {
+    inPerson,
+    setInPerson,
+    priority,
+    setPriority,
+    date,
+    setDate,
+    start,
+    setStart,
+    end,
+    setEnd,
+    repeat,
+    setRepeat,
+    availWindow,
+    setAvailWindow,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
+    waitlistMessage,
+    extraInfo,
+  } = props;
+
+  const showAvailability = priority === 'URGENTE' || priority === 'RELEVANTE';
 
   return (
     <>
@@ -235,7 +338,7 @@ function EventoSection(props: CommonProps) {
         </>
       )}
 
-      {(priority === 'URGENTE' || priority === 'RELEVANTE') && (
+      {showAvailability && (
         <DisponibilidadControl
           availWindow={availWindow}
           setAvailWindow={setAvailWindow}
@@ -248,48 +351,11 @@ function EventoSection(props: CommonProps) {
 
       {priority === 'OPCIONAL' && (
         <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded border border-ui">
-          Este elemento se enviará a la lista de espera (sin fecha ni hora).
-        </div>
-      )}
-    </>
-  );
-}
-
-function TareaSection(props: CommonProps) {
-  const { inPerson, setInPerson, priority, setPriority, date, setDate, start, setStart, end, setEnd, repeat, setRepeat, availWindow, setAvailWindow, rangeStart, setRangeStart, rangeEnd, setRangeEnd } = props;
-
-  return (
-    <>
-      <PresencialidadControl inPerson={inPerson} setInPerson={setInPerson} />
-      <PriorityControl priority={priority} setPriority={setPriority} />
-
-      {priority === 'CRITICA' && (
-        <>
-          <DateTimeControl date={date} setDate={setDate} start={start} setStart={setStart} end={end} setEnd={setEnd} required />
-          <RepeatControl repeat={repeat} setRepeat={setRepeat} />
-        </>
-      )}
-
-      {(priority === 'URGENTE' || priority === 'RELEVANTE') && (
-        <DisponibilidadControl
-          availWindow={availWindow}
-          setAvailWindow={setAvailWindow}
-          rangeStart={rangeStart}
-          setRangeStart={setRangeStart}
-          rangeEnd={rangeEnd}
-          setRangeEnd={setRangeEnd}
-        />
-      )}
-
-      {priority === 'OPCIONAL' && (
-        <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded border border-ui">
-          Esta tarea se enviará en la lista de espera (sin fecha ni hora).
+          {waitlistMessage}
         </div>
       )}
 
-      <div className="text-xs text-gray-500 mt-2 p-2 bg-blue-50 rounded border border-blue-200">
-        💡 Las tareas aparecerán en el calendario y en la vista de Tareas.
-      </div>
+      {extraInfo}
     </>
   );
 }
@@ -315,26 +381,17 @@ function DisponibilidadSection(props: DisponibilidadSectionProps) {
   return (
     <>
       <DateTimeControl date={date} setDate={setDate} start={start} setStart={setStart} end={end} setEnd={setEnd} />
-      
-      <Section title="Ventana de disponibilidad">
-        <div className="space-y-2">
-          <select
-            value={availWindow}
-            onChange={(e) => setAvailWindow(e.target.value as AvailLabel)}
-            className="w-full h-10 rounded border border-ui px-3 bg-white"
-          >
-            {AVAIL_WINDOWS.map((w) => (
-              <option key={w} value={w}>{w}</option>
-            ))}
-          </select>
-          {availWindow === 'Rango personalizado' && (
-            <div className="flex gap-2">
-              <input type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} className="flex-1 h-10 rounded border border-ui px-3" />
-              <input type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} className="flex-1 h-10 rounded border border-ui px-3" />
-            </div>
-          )}
-        </div>
-      </Section>
+
+      <DisponibilidadControl
+        availWindow={availWindow}
+        setAvailWindow={setAvailWindow}
+        rangeStart={rangeStart}
+        setRangeStart={setRangeStart}
+        rangeEnd={rangeEnd}
+        setRangeEnd={setRangeEnd}
+        title="Ventana de disponibilidad"
+        helperText={undefined}
+      />
 
       <Section title="Colaboración">
         <input
@@ -364,7 +421,7 @@ function useFormState() {
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
 
-  const resetAll = () => {
+  const resetAll = useCallback(() => {
     setTitle('');
     setDescription('');
     setCategory('');
@@ -378,7 +435,21 @@ function useFormState() {
     setRangeStart('');
     setRangeEnd('');
     setTab('evento');
-  };
+  }, [
+    setTitle,
+    setDescription,
+    setCategory,
+    setInPerson,
+    setPriority,
+    setDate,
+    setStart,
+    setEnd,
+    setRepeat,
+    setAvailWindow,
+    setRangeStart,
+    setRangeEnd,
+    setTab,
+  ]);
 
   return {
     tab, setTab,
@@ -399,6 +470,14 @@ function useFormState() {
 }
 
 /* ===================== Utilidades de validación ===================== */
+function validateTitle(title: string): boolean {
+  if (!title.trim()) {
+    alert('El título es obligatorio.');
+    return false;
+  }
+  return true;
+}
+
 function validateCriticalDateTime(date: string, start: string, end: string): boolean {
   if (!date || !start || !end) {
     alert('Para prioridad crítica, se requiere fecha y horas de inicio/fin.');
@@ -415,25 +494,25 @@ function validateCustomRange(availWindow: AvailLabel, rangeStart: string, rangeE
   return true;
 }
 
-function buildPayloadBase(state: ReturnType<typeof useFormState>, kind: 'EVENTO' | 'TAREA' | 'SOLICITUD'): Record<string, any> {
+function buildPayloadBase(state: ReturnType<typeof useFormState>, kind: ItemPayload['kind']): ItemPayload {
   return {
     kind,
-    title: state.title,
-    description: state.description || null,
-    category: state.category || null,
-    isInPerson: state.inPerson,
-    canOverlap: !state.inPerson,
-    priority: state.priority,
-    repeat: state.repeat,
+    title: title,
+    description: description || null,
+    category: category || null,
+    isInPerson: inPerson,
+    canOverlap: !inPerson,
+    priority: priority,
+    repeat: repeat,
   };
 }
 
-function addDateTimeToPayload(payload: Record<string, any>, date: string, start: string, end: string) {
+function addDateTimeToPayload(payload: ItemPayload, date: string, start: string, end: string) {
   payload.start = new Date(`${date}T${start}:00`).toISOString();
   payload.end = new Date(`${date}T${end}:00`).toISOString();
 }
 
-function addWindowToPayload(payload: Record<string, any>, availWindow: AvailLabel, rangeStart: string, rangeEnd: string) {
+function addWindowToPayload(payload: ItemPayload, availWindow: AvailLabel, rangeStart: string, rangeEnd: string) {
   payload.window = WINDOW_MAP[availWindow];
   if (availWindow === 'Rango personalizado') {
     payload.windowStart = new Date(`${rangeStart}T00:00:00`).toISOString();
@@ -441,28 +520,142 @@ function addWindowToPayload(payload: Record<string, any>, availWindow: AvailLabe
   }
 }
 
+function buildScheduledPayload(
+  state: ReturnType<typeof useFormState>,
+  kind: 'EVENTO' | 'TAREA',
+  options: { allowManualDateTimeFallback?: boolean } = {},
+) : ItemPayload | null {
+  const payload = buildPayloadBase(state, kind);
+
+  if (priority === 'CRITICA') {
+    if (!validateCriticalDateTime(date, start, end)) return null;
+    addDateTimeToPayload(payload, date, start, end);
+  } else if (priority === 'URGENTE' || priority === 'RELEVANTE') {
+    if (!validateCustomRange(availWindow, rangeStart, rangeEnd)) return null;
+    if (options.allowManualDateTimeFallback && date && start && end) {
+      addDateTimeToPayload(payload, date, start, end);
+    } else {
+      addWindowToPayload(payload, availWindow, rangeStart, rangeEnd);
+    }
+  } else {
+    payload.status = 'WAITLIST';
+  }
+
+  return payload;
+}
+
 /* ===================== Modal principal ===================== */
 export default function NewItemModal({
   open,
   onClose,
   onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated?: () => void;
-}) {
+  onUpdated,
+  editingEvent,
+}: NewItemModalProps) {
   const state = useFormState();
 
-  const handleCreate = async (endpoint: string, payload: any, errorMsg: string) => {
+  const {
+    tab,
+    setTab,
+    title,
+    setTitle,
+    description,
+    setDescription,
+    category,
+    setCategory,
+    inPerson,
+    setInPerson,
+    priority,
+    setPriority,
+    date,
+    setDate,
+    start,
+    setStart,
+    end,
+    setEnd,
+    repeat,
+    setRepeat,
+    availWindow,
+    setAvailWindow,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
+    resetAll,
+  } = state;
+
+  const isEditing = Boolean(editingEvent);
+
+  useEffect(() => {
+    if (!open) {
+      resetAll();
+      return;
+    }
+  }, [open, resetAll]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    if (!editingEvent) {
+      resetAll();
+      return;
+    }
+
+    const tabFromKind: TabKey = editingEvent.kind === 'EVENTO'
+      ? 'evento'
+      : editingEvent.kind === 'TAREA'
+        ? 'tarea'
+        : 'disponibilidad';
+    setTab(tabFromKind);
+    setTitle(editingEvent.title);
+    setDescription(editingEvent.description ?? '');
+    setCategory(editingEvent.category ?? '');
+    setInPerson(editingEvent.isInPerson);
+    setPriority(editingEvent.priority);
+    setRepeat(editingEvent.repeat);
+
+    if (editingEvent.start && editingEvent.end) {
+      setDate(toDateInput(editingEvent.start));
+      setStart(toTimeInput(editingEvent.start));
+      setEnd(toTimeInput(editingEvent.end));
+    } else {
+      setDate('');
+      setStart('');
+      setEnd('');
+    }
+
+    const windowCode: WindowCode = editingEvent.window ?? 'NONE';
+    setAvailWindow(WINDOW_REVERSE_MAP[windowCode] ?? 'Pronto');
+
+    if (windowCode === 'RANGO' && editingEvent.windowStart && editingEvent.windowEnd) {
+      setRangeStart(toDateInput(editingEvent.windowStart));
+      setRangeEnd(toDateInput(editingEvent.windowEnd));
+    } else {
+      setRangeStart('');
+      setRangeEnd('');
+    }
+  }, [open, editingEvent, resetAll, setTab, setTitle, setDescription, setCategory, setInPerson, setPriority, setRepeat, setDate, setStart, setEnd, setAvailWindow, setRangeStart, setRangeEnd]);
+
+
+  const handleSubmit = async (
+    endpoint: string,
+    method: 'POST' | 'PATCH',
+    payload: ItemPayload,
+    errorMsg: string,
+  ) => {
     const res = await fetch(endpoint, {
-      method: 'POST',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
-      onCreated?.();
-      state.resetAll();
+      if (method === 'POST') {
+        onCreated?.();
+      } else {
+        onUpdated?.();
+      }
+      resetAll();
       onClose();
     } else {
       const err = await res.json().catch(() => ({}));
@@ -470,195 +663,233 @@ export default function NewItemModal({
     }
   };
 
-  const createEvento = async () => {
-    if (!state.title.trim()) {
-      alert('El título es obligatorio.');
-      return;
-    }
+  const submitEvento = async () => {
+    if (!validateTitle(title)) return;
 
-    const payload = buildPayloadBase(state, 'EVENTO');
+    const payload = buildScheduledPayload(state, 'EVENTO', { allowManualDateTimeFallback: true });
+    if (!payload) return;
 
-    if (state.priority === 'CRITICA') {
-      if (!validateCriticalDateTime(state.date, state.start, state.end)) return;
-      addDateTimeToPayload(payload, state.date, state.start, state.end);
-    } else if (state.priority === 'URGENTE' || state.priority === 'RELEVANTE') {
-      if (!validateCustomRange(state.availWindow, state.rangeStart, state.rangeEnd)) return;
-      if (state.date && state.start && state.end) {
-        addDateTimeToPayload(payload, state.date, state.start, state.end);
-      } else {
-        addWindowToPayload(payload, state.availWindow, state.rangeStart, state.rangeEnd);
-      }
+    if (isEditing && editingEvent && editingEvent.kind === 'EVENTO') {
+      await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar el evento');
     } else {
-      payload.status = 'WAITLIST';
+      await handleSubmit('/api/events', 'POST', payload, 'Error al crear el evento');
     }
-
-    await handleCreate('/api/events', payload, 'Error al crear el evento');
   };
 
-  const createTarea = async () => {
-    if (!state.title.trim()) {
-      alert('El título es obligatorio.');
-      return;
-    }
+  const submitTarea = async () => {
+    if (!validateTitle(title)) return;
 
-    const payload = buildPayloadBase(state, 'TAREA');
+    const payload = buildScheduledPayload(state, 'TAREA');
+    if (!payload) return;
 
-    if (state.priority === 'CRITICA') {
-      if (!validateCriticalDateTime(state.date, state.start, state.end)) return;
-      addDateTimeToPayload(payload, state.date, state.start, state.end);
-    } else if (state.priority === 'URGENTE' || state.priority === 'RELEVANTE') {
-      if (!validateCustomRange(state.availWindow, state.rangeStart, state.rangeEnd)) return;
-      addWindowToPayload(payload, state.availWindow, state.rangeStart, state.rangeEnd);
+    if (isEditing && editingEvent && editingEvent.kind === 'TAREA') {
+      await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar la tarea');
     } else {
-      payload.status = 'WAITLIST';
+      await handleSubmit('/api/events', 'POST', payload, 'Error al crear tarea');
     }
-
-    await handleCreate('/api/events', payload, 'Error al crear tarea');
   };
 
-  const createSolicitud = async () => {
-    if (!state.title.trim()) {
-      alert('El título es obligatorio.');
-      return;
-    }
+  const submitSolicitud = async () => {
+    if (!validateTitle(title)) return;
 
-    const payload: any = {
+    const payload: ItemPayload = {
       kind: 'SOLICITUD',
-      title: state.title,
-      description: state.description,
-      priority: 'RELEVANTE',
-      category: state.category || null,
+      title: title,
+      description: description || null,
+      category: category || null,
       isInPerson: true,
-      status: 'PENDING',
-      shareLink: 'https://tuapp/solicitud/xxxx',
+      canOverlap: false,
+      priority: 'RELEVANTE',
+      repeat: 'NONE',
+      status: isEditing && editingEvent ? editingEvent.status : 'PENDING',
+      shareLink: isEditing && editingEvent ? editingEvent.shareLink || undefined : 'https://tuapp/solicitud/xxxx',
     };
 
-    addWindowToPayload(payload, state.availWindow, state.rangeStart, state.rangeEnd);
+    if (!validateCustomRange(availWindow, rangeStart, rangeEnd)) return;
+    addWindowToPayload(payload, availWindow, rangeStart, rangeEnd);
 
-    await handleCreate('/api/events', payload, 'Error al crear la solicitud de disponibilidad');
+    if (isEditing && editingEvent && editingEvent.kind === 'SOLICITUD') {
+      await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar la solicitud de disponibilidad');
+    } else {
+      await handleSubmit('/api/events', 'POST', payload, 'Error al crear la solicitud de disponibilidad');
+    }
   };
 
   if (!open) return null;
+  if (!currentTab) return null;
 
-  const tabs = [
-    { key: 'evento', label: 'Crear evento', action: createEvento, btnText: 'Guardar evento' },
-    { key: 'tarea', label: 'Crear tarea', action: createTarea, btnText: 'Guardar tarea' },
-    { key: 'disponibilidad', label: 'Solicitud de disponibilidad', action: createSolicitud, btnText: 'Crear solicitud' },
-  ];
+  const schedulingProps: CommonProps = {
+    inPerson: inPerson,
+    setInPerson: setInPerson,
+    priority: priority,
+    setPriority: setPriority,
+    date: date,
+    setDate: setDate,
+    start: start,
+    setStart: setStart,
+    end: end,
+    setEnd: setEnd,
+    repeat: repeat,
+    setRepeat: setRepeat,
+    availWindow: availWindow,
+    setAvailWindow: setAvailWindow,
+    rangeStart: rangeStart,
+    setRangeStart: setRangeStart,
+    rangeEnd: rangeEnd,
+    setRangeEnd: setRangeEnd,
+  };
 
-  const currentTab = tabs.find(t => t.key === state.tab)!;
+  const tabConfigs = [
+    {
+      key: 'evento',
+      createLabel: 'Crear evento',
+      editLabel: 'Editar evento',
+      createBtn: 'Guardar evento',
+      editBtn: 'Actualizar evento',
+      action: submitEvento,
+    },
+    {
+      key: 'tarea',
+      createLabel: 'Crear tarea',
+      editLabel: 'Editar tarea',
+      createBtn: 'Guardar tarea',
+      editBtn: 'Actualizar tarea',
+      action: submitTarea,
+    },
+    {
+      key: 'disponibilidad',
+      createLabel: 'Solicitud de disponibilidad',
+      editLabel: 'Editar solicitud',
+      createBtn: 'Crear solicitud',
+      editBtn: 'Actualizar solicitud',
+      action: submitSolicitud,
+    },
+  ] as const;
+
+  const enforcedTabKey: TabKey | null = isEditing && editingEvent
+    ? (editingEvent.kind === 'EVENTO'
+        ? 'evento'
+        : editingEvent.kind === 'TAREA'
+          ? 'tarea'
+          : 'disponibilidad')
+    : null;
+
+  const tabs = tabConfigs
+    .filter((tab) => !enforcedTabKey || tab.key === enforcedTabKey)
+    .map((tab) => ({
+      key: tab.key,
+      label: isEditing ? tab.editLabel : tab.createLabel,
+      action: tab.action,
+      btnText: isEditing ? tab.editBtn : tab.createBtn,
+    }));
+
+  const currentTab = tabs.find((t) => t.key === tab) ?? tabs[0];
 
   return (
     <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="w-[720px] max-w-[95vw] max-h-[85vh] overflow-y-auto bg-surface rounded-2xl p-6 pb-0 border border-ui shadow-xl">
+      <div className="w-[720px] max-w-[95vw] max-h-[85vh] bg-surface rounded-2xl border border-ui shadow-xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Crear</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-ui bg-surface sticky top-0 z-20">
+          <h2 className="text-lg font-semibold text-gray-900">{isEditing ? 'Editar' : 'Crear'}</h2>
           <button
             className="text-sm px-3 py-2 rounded border border-ui hover:bg-gray-50 transition-colors"
-            onClick={() => { state.resetAll(); onClose(); }}
+            onClick={() => { resetAll(); onClose(); }}
           >
             Cerrar
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2 border-b border-ui mb-6">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => state.setTab(t.key as TabKey)}
-              className={`px-3 py-2 text-sm rounded-t border border-ui border-b-0 transition-all ${
-                state.tab === t.key ? 'bg-white font-medium' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-6 min-h-0">
+          {/* Tabs */}
+          <div className="flex gap-2 border-b border-ui mb-6">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key as TabKey)}
+                className={`px-3 py-2 text-sm rounded-t border border-ui border-b-0 transition-all ${
+                  tab === t.key ? 'bg-white font-medium' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
 
-        {/* Formulario */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <Section title="Título (obligatorio)">
-            <input
-              value={state.title}
-              onChange={(e) => state.setTitle(e.target.value)}
-              className="w-full h-10 rounded border border-ui px-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              placeholder="Escribe un título"
-            />
-          </Section>
-
-          <Section title="Categoría (opcional)">
-            <select
-              value={state.category}
-              onChange={(e) => state.setCategory(e.target.value)}
-              className="w-full h-10 rounded border border-ui px-3 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            >
-              <option value="">Sin categoría</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </Section>
-
-          <div className="col-span-2">
-            <Section title="Descripción (opcional)">
-              <textarea
-                value={state.description}
-                onChange={(e) => state.setDescription(e.target.value)}
-                className="w-full h-24 rounded border border-ui px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                placeholder="Descripción"
+          {/* Formulario */}
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <Section title="Título (obligatorio)">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full h-10 rounded border border-ui px-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                placeholder="Escribe un título"
               />
             </Section>
+
+            <Section title="Categoría (opcional)">
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full h-10 rounded border border-ui px-3 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              >
+                <option value="">Sin categoría</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </Section>
+
+            <div className="col-span-2">
+              <Section title="Descripción (opcional)">
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full h-24 rounded border border-ui px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  placeholder="Descripción"
+                />
+              </Section>
+            </div>
+
+            <div className="col-span-2">
+              {tab === 'evento' && (
+                <SchedulingSection
+                  {...schedulingProps}
+                  waitlistMessage="Este elemento se enviará a la lista de espera (sin fecha ni hora)."
+                />
+              )}
+
+              {tab === 'tarea' && (
+                <SchedulingSection
+                  {...schedulingProps}
+                  waitlistMessage="Esta tarea se enviará en la lista de espera (sin fecha ni hora)."
+                  extraInfo={(
+                    <div className="text-xs text-gray-500 mt-2 p-2 bg-blue-50 rounded border border-blue-200">
+                      💡 Las tareas aparecerán en el calendario y en la vista de Tareas.
+                    </div>
+                  )}
+                />
+              )}
+
+              {tab === 'disponibilidad' && (
+                <DisponibilidadSection
+                  date={date} setDate={setDate}
+                  start={start} setStart={setStart}
+                  end={end} setEnd={setEnd}
+                  availWindow={availWindow} setAvailWindow={setAvailWindow}
+                  rangeStart={rangeStart} setRangeStart={setRangeStart}
+                  rangeEnd={rangeEnd} setRangeEnd={setRangeEnd}
+                />
+              )}
+            </div>
           </div>
 
-          <div className="col-span-2">
-            {state.tab === 'evento' && (
-              <EventoSection
-                inPerson={state.inPerson} setInPerson={state.setInPerson}
-                priority={state.priority} setPriority={state.setPriority}
-                date={state.date} setDate={state.setDate}
-                start={state.start} setStart={state.setStart}
-                end={state.end} setEnd={state.setEnd}
-                repeat={state.repeat} setRepeat={state.setRepeat}
-                availWindow={state.availWindow} setAvailWindow={state.setAvailWindow}
-                rangeStart={state.rangeStart} setRangeStart={state.setRangeStart}
-                rangeEnd={state.rangeEnd} setRangeEnd={state.setRangeEnd}
-              />
-            )}
-
-            {state.tab === 'tarea' && (
-              <TareaSection
-                inPerson={state.inPerson} setInPerson={state.setInPerson}
-                priority={state.priority} setPriority={state.setPriority}
-                date={state.date} setDate={state.setDate}
-                start={state.start} setStart={state.setStart}
-                end={state.end} setEnd={state.setEnd}
-                repeat={state.repeat} setRepeat={state.setRepeat}
-                availWindow={state.availWindow} setAvailWindow={state.setAvailWindow}
-                rangeStart={state.rangeStart} setRangeStart={state.setRangeStart}
-                rangeEnd={state.rangeEnd} setRangeEnd={state.setRangeEnd}
-              />
-            )}
-
-            {state.tab === 'disponibilidad' && (
-              <DisponibilidadSection
-                date={state.date} setDate={state.setDate}
-                start={state.start} setStart={state.setStart}
-                end={state.end} setEnd={state.setEnd}
-                availWindow={state.availWindow} setAvailWindow={state.setAvailWindow}
-                rangeStart={state.rangeStart} setRangeStart={state.setRangeStart}
-                rangeEnd={state.rangeEnd} setRangeEnd={state.setRangeEnd}
-              />
-            )}
-          </div>
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 sticky bottom-0 bg-surface py-4 border-t border-ui">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-ui bg-surface">
           <button
             className="h-10 px-4 rounded border border-ui hover:bg-gray-50 transition-colors"
-            onClick={() => { state.resetAll(); onClose(); }}
+            onClick={() => { resetAll(); onClose(); }}
           >
             Cancelar
           </button>

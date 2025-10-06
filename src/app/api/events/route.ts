@@ -139,7 +139,7 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(created, { status: 201 });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Error al crear evento:', err);
     return NextResponse.json({ error: 'Error interno al crear evento' }, { status: 500 });
   }
