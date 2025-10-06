@@ -16,37 +16,35 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Entrada esperada (algunas opcionales)
     const {
       title,
       description,
-      priority,              // 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL'
-      category,              // string?
-      isInPerson,            // boolean
-      canOverlap,            // boolean (si no viene: !isInPerson)
-      start,                 // ISO opcional
-      end,                   // ISO opcional
-      repeat,                // 'NONE'|'DAILY'|'WEEKLY'|'MONTHLY'|'YEARLY'
-      window,                // 'PRONTO'|'SEMANA'|'MES'|'RANGO'|'NONE'
-      windowStart,           // ISO opcional
-      windowEnd,             // ISO opcional
-      kind,                  // 'EVENTO'|'TAREA'|'SOLICITUD'
-      status,                // string opcional (ej. 'PENDING')
-      shareLink,             // string opcional
+      priority,
+      category,
+      isInPerson,
+      canOverlap,
+      start,
+      end,
+      repeat,
+      window,
+      windowStart,
+      windowEnd,
+      kind,
+      status,
+      shareLink,
     } = body || {};
 
     if (!title || typeof title !== 'string') {
       return NextResponse.json({ error: 'title es obligatorio' }, { status: 400 });
     }
 
-    // Normaliza enums seguros hacia Prisma
     const safePriority: Priority = (priority && ['CRITICA','URGENTE','RELEVANTE','OPCIONAL'].includes(priority))
       ? priority
       : 'RELEVANTE';
 
     const safeKind: EventKind = (kind && ['EVENTO','TAREA','SOLICITUD'].includes(kind))
       ? kind
-      : (shareLink ? 'SOLICITUD' : 'EVENTO'); // heurística para solicitudes
+      : (shareLink ? 'SOLICITUD' : 'EVENTO');
 
     const safeRepeat: RepeatRule = (repeat && ['NONE','DAILY','WEEKLY','MONTHLY','YEARLY'].includes(repeat))
       ? repeat
@@ -59,9 +57,7 @@ export async function POST(req: Request) {
     const safeIsInPerson: boolean = (typeof isInPerson === 'boolean') ? isInPerson : true;
     const safeCanOverlap: boolean = (typeof canOverlap === 'boolean') ? canOverlap : !safeIsInPerson;
 
-    // Reglas Eisenhower
 
-    // 1) CRITICA → requiere fecha y hora obligatoria
     if (safePriority === 'CRITICA') {
       if (!start || !end) {
         return NextResponse.json(
@@ -71,14 +67,10 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2) URGENTE/RELEVANTE → si no hay fecha/hora, usar ventana
     if ((safePriority === 'URGENTE' || safePriority === 'RELEVANTE') && (!start || !end)) {
       if (safeWindow === 'NONE') {
-        // Por defecto, si no mandan ventana, interpretamos PRONTO
-        // (o devuelve 400 si quieres obligar)
       }
       if (safeWindow === 'RANGO') {
-        // si es RANGO, aseguramos windowStart/windowEnd
         if (!windowStart || !windowEnd) {
           return NextResponse.json(
             { error: 'Para ventana RANGO, windowStart y windowEnd son obligatorios.' },
@@ -88,7 +80,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) OPCIONAL → se va a lista de espera (sin fechas)
     let finalStatus = status || 'SCHEDULED';
     let finalStart: Date | null = start ? new Date(start) : null;
     let finalEnd: Date | null = end ? new Date(end) : null;
@@ -99,17 +90,12 @@ export async function POST(req: Request) {
       finalEnd = null;
     }
 
-    // 4) SOLICITUD → por defecto status PENDING y requiere al menos una ventana
     if (safeKind === 'SOLICITUD' && (!start || !end)) {
       if (finalStatus === 'SCHEDULED') finalStatus = 'PENDING';
       if (safeWindow === 'NONE') {
-        // fuerza ventana por defecto
-        // si quieres, devuelve 400:
-        // return NextResponse.json({ error: 'Solicitud requiere ventana de disponibilidad.' }, { status: 400 });
       }
     }
 
-    // Asegura usuario demo
     let user = await prisma.user.findUnique({ where: { id: DEMO_USER } });
     if (!user) {
       user = await prisma.user.create({ data: { id: DEMO_USER, email: 'demo@example.com', name: 'Demo' } });

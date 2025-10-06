@@ -4,14 +4,11 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-// Generador de cliente Prisma
 generator client {
   provider = "prisma-client-js"
 }
 
-// ===== Enums =====
 
-// Matriz Eisenhower
 enum Priority {
   CRITICA // Urgente e Importante
   URGENTE // Urgente, no Importante
@@ -19,7 +16,7 @@ enum Priority {
   OPCIONAL // Ni Urgente ni Importante
 }
 
-// Repetición
+
 enum RepeatRule {
   NONE
   DAILY
@@ -28,7 +25,7 @@ enum RepeatRule {
   YEARLY
 }
 
-// Ventanas de disponibilidad para auto-agendado
+
 enum AvailabilityWindow {
   NONE
   PRONTO
@@ -37,14 +34,14 @@ enum AvailabilityWindow {
   RANGO
 }
 
-// Tipo de registro
+
 enum EventKind {
   EVENTO
   TAREA
   SOLICITUD
 }
 
-// ===== Modelos =====
+
 
 model User {
   id     String             @id @default(cuid())

@@ -1,28 +1,214 @@
 @import "tailwindcss";
 
 :root {
-  --accent: #10B981;
-  --bg: #F9FAFB;
-  --surface: #FFFFFF;
-  --border: #E5E7EB;
-  --text: #111827;
+  --bg:        #FAFAFB;
+  --surface:   #FFFFFF;
+  --surface-2: #F6F7F9;
+  --border:    #E6E8EC;
+  --text:      #0F172A;
+  --muted:     #64748B;
 
-  --critica: #EF4444;
-  --urgente: #F59E0B;
+  --accent:    #2563EB;
+  --accent-50: #EFF6FF;
+  --accent-600:#2563EB;
+  --accent-700:#1D4ED8;
+
+  --critica:   #EF4444;
+  --urgente:   #F59E0B;
   --relevante: #10B981;
-  --opcional: #9CA3AF;
+  --opcional:  #94A3B8;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 8px 20px rgba(2, 6, 23, 0.06);
+  --ring:      0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
-/* utilidades propias (v4) */
-@utility badge {
-  @apply px-2 py-0.5 text-xs rounded;
-}
-@utility badge-critica   { background: var(--critica);   color: #fff; }
-@utility badge-urgente   { background: var(--urgente);   color: #111827; }
-@utility badge-relevante { background: var(--relevante); color: #fff; }
-@utility badge-opcional  { background: var(--opcional);  color: #111827; }
+@utility bg-app     { background: var(--bg); }
+@utility bg-surface { background: var(--surface); }
+@utility text-body  { color: var(--text); }
+@utility border-ui  { border-color: var(--border); }
 
-.bg-surface { background: var(--surface); }
-.bg-app     { background: var(--bg); }
-.text-body  { color: var(--text); }
-.border-ui  { border-color: var(--border); }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: 8px;
+}
+
+@utility card {
+  @apply rounded-xl border border-ui bg-surface shadow-[var(--shadow-sm)];
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center h-9 px-3 rounded-lg border border-ui bg-surface text-sm text-[var(--text)] hover:bg-[var(--surface-2)] transition;
+}
+@utility btn-primary {
+  @apply inline-flex items-center justify-center h-9 px-3 rounded-lg text-white text-sm;
+  background: var(--accent-600);
+}
+.btn-primary:hover { background: var(--accent-700); }
+
+@utility input {
+  @apply h-9 px-3 rounded-lg border border-ui bg-white text-sm placeholder:text-[color:var(--muted)] outline-none;
+}
+@utility select {
+  @apply h-9 px-3 rounded-lg border border-ui bg-white text-sm;
+}
+
+@utility toolbar {
+  @apply flex items-center justify-between gap-3 rounded-xl border border-ui bg-surface px-3 py-2 shadow-[var(--shadow-sm)];
+}
+
+@utility seg {
+  @apply inline-flex items-center gap-1 rounded-lg border border-ui bg-[var(--surface-2)] p-1;
+}
+@utility seg-item {
+  @apply h-8 px-3 rounded-md text-sm text-[var(--muted)] hover:bg-white;
+}
+
+@utility seg-item--active {
+  @apply bg-white text-[var(--text)] shadow-[var(--shadow-sm)];
+}
+
+@utility chip { @apply inline-flex items-center gap-1 px-2.5 h-6 rounded-full text-xs font-medium; }
+@utility chip-critica   { background: color-mix(in oklab, var(--critica) 16%, white);   color: #991B1B; }
+@utility chip-urgente   { background: color-mix(in oklab, var(--urgente) 16%, white);   color: #92400E; }
+@utility chip-relevante { background: color-mix(in oklab, var(--relevante) 16%, white); color: #065F46; }
+@utility chip-opcional  { background: color-mix(in oklab, var(--opcional) 16%, white);  color: #334155; }
+
+.aside-link {
+  @apply block px-3 py-2 rounded-lg text-sm text-[var(--text)] hover:bg-[var(--surface-2)] transition;
+}
+.aside-link--active {
+  background: var(--accent-50);
+  border: 1px solid var(--accent-600);
+}
+
+.cal-toolbar { @apply toolbar sticky top-0 z-10; }
+.cal-title   { @apply text-base font-semibold; }
+.cal-views   { @apply seg; }
+.cal-views button { @apply seg-item; }
+.cal-views .active { @apply seg-item seg-item--active; }
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.cal-head, .cal-row { display: contents; }
+.cal-head > div, .cal-cell, .cal-time {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.cal-head > div { @apply text-xs font-medium text-[var(--muted)] bg-[var(--surface-2)] py-2 px-2; }
+.cal-time       { @apply text-xs text-[var(--muted)] bg-[var(--surface-2)] py-2 px-2; }
+.cal-cell       { @apply relative h-24 bg-white hover:bg-[color:rgba(37,99,235,0.03)] transition; }
+.cal-event {
+  @apply absolute left-1 right-1 rounded-md text-xs px-2 py-1 text-white shadow-[var(--shadow-sm)];
+  background: var(--accent-600);
+}
+
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-md { box-shadow: var(--shadow-md); }
+
+
+.fc {
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--surface);
+  --fc-neutral-bg-color: var(--surface-2);
+  --fc-neutral-text-color: var(--muted);
+  --fc-button-text-color: var(--text);
+  --fc-today-bg-color: color-mix(in oklab, var(--accent) 10%, white);
+  --fc-now-indicator-color: var(--accent-600);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+.fc .fc-toolbar {
+  padding: 6px 0;
+  gap: 12px;
+}
+.fc .fc-toolbar-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.fc .fc-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  text-transform: none;
+}
+.fc .fc-button:hover {
+  background: var(--surface-2);
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:focus {
+  background: var(--accent-600);
+  color: #fff;
+  border-color: var(--accent-600);
+}
+.fc .fc-button-primary:disabled {
+  opacity: .6;
+}
+
+.fc .fc-scrollgrid {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.fc .fc-col-header-cell {
+  background: var(--surface-2);
+  font-size: .75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.fc .fc-timegrid-slot {
+  height: 48px;
+}
+
+.fc .fc-day-today .fc-daygrid-day-frame,
+.fc .fc-timegrid-col.fc-day-today {
+  background: color-mix(in oklab, var(--accent) 6%, white);
+}
+.fc .fc-timegrid-now-indicator-line {
+  border-color: var(--accent-600);
+}
+
+.fc .fc-event {
+  border: 0;
+  border-radius: 10px;
+  padding: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.fc-event.priority-critica   { background: var(--critica) !important;   color: #fff !important; }
+.fc-event.priority-urgente   { background: var(--urgente) !important;   color: #111827 !important; }
+.fc-event.priority-relevante { background: var(--relevante) !important; color: #fff !important; }
+.fc-event.priority-opcional  { background: var(--opcional) !important;  color: #111827 !important; }
+
+.fc .fc-daygrid-more-link { 
+  color: var(--accent-600);
+  font-weight: 500;
+}
+.fc .fc-daygrid-day-number { color: var(--text); }
+
+.fc .fc-scroller {
+  scrollbar-width: thin;
+}
+.fc .fc-scroller::-webkit-scrollbar {
+  height: 8px;
+  width: 10px;
+}
+.fc .fc-scroller::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 999px;
+}

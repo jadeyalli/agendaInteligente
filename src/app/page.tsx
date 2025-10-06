@@ -1,103 +1,100 @@
-import Image from "next/image";
+import './globals.css';
+import ThemeProvider from './theme-provider';
+import Link from 'next/link';
+import { Inter } from 'next/font/google';
 
-export default function Home() {
+type ThemePrefs = {
+  colorCritica?: string;
+  colorUrgente?: string;
+  colorRelevante?: string;
+  colorOpcional?: string;
+};
+
+function extractThemePrefs(value: unknown): ThemePrefs | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    colorCritica: typeof record.colorCritica === 'string' ? record.colorCritica : undefined,
+    colorUrgente: typeof record.colorUrgente === 'string' ? record.colorUrgente : undefined,
+    colorRelevante: typeof record.colorRelevante === 'string' ? record.colorRelevante : undefined,
+    colorOpcional: typeof record.colorOpcional === 'string' ? record.colorOpcional : undefined,
+  };
+}
+
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+
+export const metadata = {
+  title: 'Agenda Inteligente',
+  description: 'Prototipo Incremento 1',
+};
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const base = process.env.NEXT_PUBLIC_BASE_URL;
+  const endpoint = base ? new URL('/api/prefs', base).toString() : '/api/prefs';
+
+  let prefs: ThemePrefs | null = null;
+  try {
+    const res = await fetch(endpoint, { cache: 'no-store', next: { revalidate: 0 } });
+    if (res.ok) {
+      const data: unknown = await res.json();
+      prefs = extractThemePrefs(data);
+    }
+  } catch (error) {
+    console.error('Error al cargar preferencias', error);
+  }
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <html lang="es">
+      <body
+        className={`${inter.variable} bg-app text-body`}
+        style={{ fontFamily: 'var(--font-inter), system-ui, Arial' }}
+      >
+        <ThemeProvider prefs={prefs ?? undefined}>
+          <div className="min-h-screen grid grid-rows-[56px_1fr]">
+            {/* Topbar */}
+            <nav className="px-4 md:px-6 bg-surface border-b border-ui flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="size-6 rounded-lg" style={{ background: 'var(--accent)' }} />
+                <span className="font-semibold tracking-tight">Agenda Inteligente</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  className="input w-64 hidden md:block"
+                  placeholder="Buscar ( / )"
+                  aria-label="Buscar"
+                />
+                <Link
+                  href="/settings"
+                  className="btn"
+                  title="Preferencias"
+                >
+                  Preferencias
+                </Link>
+                <button className="btn-primary">Crear</button>
+              </div>
+            </nav>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+            {/* Body */}
+            <div className="grid grid-cols-[240px_1fr] gap-0">
+              {/* Sidebar */}
+              <aside className="hidden md:block bg-surface border-r border-ui p-3">
+                <div className="card p-3">
+                  <p className="text-xs uppercase tracking-wide text-[var(--muted)] mb-2">Navegación</p>
+                  <nav className="space-y-1.5">
+                    <Link className="aside-link" href="/">Hoy</Link>
+                    <Link className="aside-link aside-link--active" href="/calendar">Calendario</Link>
+                    <Link className="aside-link" href="/kanban">Tareas</Link>
+                    <Link className="aside-link" href="/settings">Configurar</Link>
+                  </nav>
+                </div>
+              </aside>
+
+              {/* Main */}
+              <main className="p-4 md:p-6">{children}</main>
+            </div>
+          </div>
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }

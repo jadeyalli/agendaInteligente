@@ -1,10 +1,12 @@
 'use client';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import type { EventClickArg } from '@fullcalendar/core';
+import esLocale from '@fullcalendar/core/locales/es';
+import type { EventClickArg, EventContentArg } from '@fullcalendar/core';
 import NewItemModal, { type EditableEvent, type WindowCode } from '@/components/NewItemModal';
 import EventDetailsModal, { type EventDetailsData } from '@/components/EventDetailsModal';
 import { PRIORITY_STYLES, type Priority } from '@/lib/priorities';
@@ -117,20 +119,12 @@ export default function CalendarPage() {
 
   useEffect(() => {
     const btn = document.getElementById('btn-new');
-    if (btn) {
-      (btn as HTMLButtonElement).onclick = handleOpenCreate;
-    }
-    return () => {
-      if (btn) {
-        (btn as HTMLButtonElement).onclick = null;
-      }
-    };
+    if (btn) (btn as HTMLButtonElement).onclick = handleOpenCreate;
+    return () => { if (btn) (btn as HTMLButtonElement).onclick = null; };
   }, [handleOpenCreate]);
 
   const eventContent = useCallback(
-    (
-      arg: Parameters<NonNullable<typeof FullCalendar.prototype.props['eventContent']>>[0],
-    ) => {
+    (arg: EventContentArg) => {
       const extended = arg.event.extendedProps as Partial<CalendarEventExtendedProps>;
       const priority: Priority = extended?.priority ?? 'RELEVANTE';
       const styles = PRIORITY_STYLES[priority];
@@ -141,16 +135,25 @@ export default function CalendarPage() {
           style={{
             background: styles.bg,
             color: styles.color,
-            borderRadius: 6,
-            padding: '2px 6px',
+            borderRadius: 8,
+            padding: '2px 8px',
+            lineHeight: 1.2,
+            fontWeight: 600,
           }}
+          title={arg.event.title}
         >
+          {arg.timeText ? <span style={{ opacity: .8, marginRight: 6 }}>{arg.timeText}</span> : null}
           {arg.event.title}
         </div>
       );
     },
-    [],
+    []
   );
+
+  const eventClassNames = useCallback((info: { event: any }) => {
+    const p: Priority = (info.event.extendedProps?.priority as Priority) ?? 'RELEVANTE';
+    return [`priority-${p.toLowerCase()}`];
+  }, []);
 
   const calendarEvents = useMemo(
     () =>
@@ -159,6 +162,7 @@ export default function CalendarPage() {
         title: evt.title,
         start: evt.start ?? undefined,
         end: evt.end ?? undefined,
+        allDay: !evt.start && !evt.end && !!evt.window,
         extendedProps: {
           priority: evt.priority,
           rawEvent: evt,
@@ -170,40 +174,27 @@ export default function CalendarPage() {
   const handleEventClick = useCallback((info: EventClickArg) => {
     const extended = info.event.extendedProps as Partial<CalendarEventExtendedProps>;
     const raw = extended?.rawEvent;
-    if (raw) {
-      setSelectedEvent(raw);
-    }
+    if (raw) setSelectedEvent(raw);
   }, []);
 
   useEffect(() => {
     if (!selectedEvent) return;
     const updated = events.find((evt) => evt.id === selectedEvent.id);
-    if (!updated) {
-      setSelectedEvent(null);
-    } else if (updated !== selectedEvent) {
-      setSelectedEvent(updated);
-    }
+    if (!updated) setSelectedEvent(null);
+    else if (updated !== selectedEvent) setSelectedEvent(updated);
   }, [events, selectedEvent]);
 
-  const handleDetailsClose = useCallback(() => {
-    setSelectedEvent(null);
-  }, []);
-
+  const handleDetailsClose = useCallback(() => setSelectedEvent(null), []);
   const handleEdit = useCallback((eventData: EventDetailsData) => {
     setSelectedEvent(null);
     setEditingEvent(eventData);
     setFormOpen(true);
   }, []);
-
-  const handleModalClose = useCallback(() => {
-    setFormOpen(false);
-    setEditingEvent(null);
-  }, []);
+  const handleModalClose = useCallback(() => { setFormOpen(false); setEditingEvent(null); }, []);
 
   const handleDelete = useCallback(
     async (eventToDelete: EventDetailsData) => {
       if (!window.confirm(`Eliminar "${eventToDelete.title}"?`)) return;
-
       try {
         const res = await fetch(`/api/events/${eventToDelete.id}`, { method: 'DELETE' });
         if (!res.ok) {
@@ -226,15 +217,45 @@ export default function CalendarPage() {
   );
 
   return (
-    <div>
-      <FullCalendar
-        plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-        initialView="timeGridWeek"
-        headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' }}
-        events={calendarEvents}
-        eventContent={eventContent}
-        eventClick={handleEventClick}
-      />
+    <div className="grid gap-4">
+      {}
+      <div className="card p-2">
+        <FullCalendar
+          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+          locales={[esLocale]}
+          locale="es"
+
+          initialView="timeGridWeek"
+          headerToolbar={{
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay',
+          }}
+
+          height="auto"
+          expandRows={true}
+          stickyHeaderDates={true}
+          nowIndicator={true}
+          dayMaxEvents={true}
+          slotMinTime="08:00:00"
+          slotMaxTime="20:00:00"
+          allDaySlot={false}
+          navLinks={true}
+          firstDay={1}
+          weekNumbers={false}
+
+          dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
+          slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+
+          events={calendarEvents}
+
+
+          eventContent={eventContent}
+          eventClassNames={eventClassNames}
+
+          eventClick={handleEventClick}
+        />
+      </div>
 
       <NewItemModal
         open={formOpen}

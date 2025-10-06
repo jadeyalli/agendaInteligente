@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 const DEMO_USER = 'demo-user';
 
 export async function GET() {
-  // asegúrate de tener un usuario demo
+
   let user = await prisma.user.findUnique({ where: { id: DEMO_USER } });
   if (!user) user = await prisma.user.create({ data: { id: DEMO_USER, email: 'demo@example.com', name: 'Demo' } });
 

@@ -15,7 +15,6 @@ function extractThemePrefs(value: unknown): ThemePrefs | null {
     return null;
   }
   const record = value as Record<string, unknown>;
-
   return {
     colorCritica: typeof record.colorCritica === 'string' ? record.colorCritica : undefined,
     colorUrgente: typeof record.colorUrgente === 'string' ? record.colorUrgente : undefined,
@@ -34,6 +33,7 @@ export const metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const base = process.env.NEXT_PUBLIC_BASE_URL;
   const endpoint = base ? new URL('/api/prefs', base).toString() : '/api/prefs';
+
   let prefs: ThemePrefs | null = null;
   try {
     const res = await fetch(endpoint, { cache: 'no-store', next: { revalidate: 0 } });

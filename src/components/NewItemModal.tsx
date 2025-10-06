@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Dispatch, SetStateAction, ReactNode } from 'react';
 import { PRIORITIES, PRIORITY_STYLES, PRIORITY_LABELS, type Priority } from '@/lib/priorities';
+
 type TabKey = 'evento' | 'tarea' | 'disponibilidad';
 type Repeat = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 type AvailLabel = 'Pronto' | 'Esta semana' | 'Este mes' | 'Rango personalizado';
@@ -72,7 +73,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-
 function toDateInput(value: string | null | undefined) {
   if (!value) return '';
   const date = new Date(value);
@@ -99,7 +99,6 @@ type NewItemModalProps = {
   editingEvent?: EditableEvent | null;
 };
 
-/* ===================== Componentes compartidos ===================== */
 type PresencialidadProps = {
   inPerson: boolean;
   setInPerson: Dispatch<SetStateAction<boolean>>;
@@ -273,7 +272,6 @@ function DisponibilidadControl(props: DisponibilidadControlProps) {
   );
 }
 
-/* ===================== Secciones principales ===================== */
 type CommonProps = {
   inPerson: boolean;
   setInPerson: Dispatch<SetStateAction<boolean>>;
@@ -405,8 +403,13 @@ function DisponibilidadSection(props: DisponibilidadSectionProps) {
   );
 }
 
-/* ===================== Hook personalizado para el estado ===================== */
-function useFormState() {
+export default function NewItemModal({
+  open,
+  onClose,
+  onCreated,
+  onUpdated,
+  editingEvent,
+}: NewItemModalProps) {
   const [tab, setTab] = useState<TabKey>('evento');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -420,6 +423,8 @@ function useFormState() {
   const [availWindow, setAvailWindow] = useState<AvailLabel>('Pronto');
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
+
+  const isEditing = Boolean(editingEvent);
 
   const resetAll = useCallback(() => {
     setTitle('');
@@ -435,163 +440,7 @@ function useFormState() {
     setRangeStart('');
     setRangeEnd('');
     setTab('evento');
-  }, [
-    setTitle,
-    setDescription,
-    setCategory,
-    setInPerson,
-    setPriority,
-    setDate,
-    setStart,
-    setEnd,
-    setRepeat,
-    setAvailWindow,
-    setRangeStart,
-    setRangeEnd,
-    setTab,
-  ]);
-
-  return {
-    tab, setTab,
-    title, setTitle,
-    description, setDescription,
-    category, setCategory,
-    inPerson, setInPerson,
-    priority, setPriority,
-    date, setDate,
-    start, setStart,
-    end, setEnd,
-    repeat, setRepeat,
-    availWindow, setAvailWindow,
-    rangeStart, setRangeStart,
-    rangeEnd, setRangeEnd,
-    resetAll,
-  };
-}
-
-/* ===================== Utilidades de validación ===================== */
-function validateTitle(title: string): boolean {
-  if (!title.trim()) {
-    alert('El título es obligatorio.');
-    return false;
-  }
-  return true;
-}
-
-function validateCriticalDateTime(date: string, start: string, end: string): boolean {
-  if (!date || !start || !end) {
-    alert('Para prioridad crítica, se requiere fecha y horas de inicio/fin.');
-    return false;
-  }
-  return true;
-}
-
-function validateCustomRange(availWindow: AvailLabel, rangeStart: string, rangeEnd: string): boolean {
-  if (availWindow === 'Rango personalizado' && (!rangeStart || !rangeEnd)) {
-    alert('Selecciona un rango válido de fechas.');
-    return false;
-  }
-  return true;
-}
-
-function buildPayloadBase(state: ReturnType<typeof useFormState>, kind: ItemPayload['kind']): ItemPayload {
-  return {
-    kind,
-    title: title,
-    description: description || null,
-    category: category || null,
-    isInPerson: inPerson,
-    canOverlap: !inPerson,
-    priority: priority,
-    repeat: repeat,
-  };
-}
-
-function addDateTimeToPayload(payload: ItemPayload, date: string, start: string, end: string) {
-  payload.start = new Date(`${date}T${start}:00`).toISOString();
-  payload.end = new Date(`${date}T${end}:00`).toISOString();
-}
-
-function addWindowToPayload(payload: ItemPayload, availWindow: AvailLabel, rangeStart: string, rangeEnd: string) {
-  payload.window = WINDOW_MAP[availWindow];
-  if (availWindow === 'Rango personalizado') {
-    payload.windowStart = new Date(`${rangeStart}T00:00:00`).toISOString();
-    payload.windowEnd = new Date(`${rangeEnd}T23:59:59`).toISOString();
-  }
-}
-
-function buildScheduledPayload(
-  state: ReturnType<typeof useFormState>,
-  kind: 'EVENTO' | 'TAREA',
-  options: { allowManualDateTimeFallback?: boolean } = {},
-) : ItemPayload | null {
-  const payload = buildPayloadBase(state, kind);
-
-  if (priority === 'CRITICA') {
-    if (!validateCriticalDateTime(date, start, end)) return null;
-    addDateTimeToPayload(payload, date, start, end);
-  } else if (priority === 'URGENTE' || priority === 'RELEVANTE') {
-    if (!validateCustomRange(availWindow, rangeStart, rangeEnd)) return null;
-    if (options.allowManualDateTimeFallback && date && start && end) {
-      addDateTimeToPayload(payload, date, start, end);
-    } else {
-      addWindowToPayload(payload, availWindow, rangeStart, rangeEnd);
-    }
-  } else {
-    payload.status = 'WAITLIST';
-  }
-
-  return payload;
-}
-
-/* ===================== Modal principal ===================== */
-export default function NewItemModal({
-  open,
-  onClose,
-  onCreated,
-  onUpdated,
-  editingEvent,
-}: NewItemModalProps) {
-  const state = useFormState();
-
-  const {
-    tab,
-    setTab,
-    title,
-    setTitle,
-    description,
-    setDescription,
-    category,
-    setCategory,
-    inPerson,
-    setInPerson,
-    priority,
-    setPriority,
-    date,
-    setDate,
-    start,
-    setStart,
-    end,
-    setEnd,
-    repeat,
-    setRepeat,
-    availWindow,
-    setAvailWindow,
-    rangeStart,
-    setRangeStart,
-    rangeEnd,
-    setRangeEnd,
-    resetAll,
-  } = state;
-
-  const isEditing = Boolean(editingEvent);
-
-  useEffect(() => {
-    if (!open) {
-      resetAll();
-      return;
-    }
-  }, [open, resetAll]);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -634,8 +483,7 @@ export default function NewItemModal({
       setRangeStart('');
       setRangeEnd('');
     }
-  }, [open, editingEvent, resetAll, setTab, setTitle, setDescription, setCategory, setInPerson, setPriority, setRepeat, setDate, setStart, setEnd, setAvailWindow, setRangeStart, setRangeEnd]);
-
+  }, [open, editingEvent, resetAll]);
 
   const handleSubmit = async (
     endpoint: string,
@@ -664,10 +512,47 @@ export default function NewItemModal({
   };
 
   const submitEvento = async () => {
-    if (!validateTitle(title)) return;
+    if (!title.trim()) {
+      alert('El título es obligatorio.');
+      return;
+    }
 
-    const payload = buildScheduledPayload(state, 'EVENTO', { allowManualDateTimeFallback: true });
-    if (!payload) return;
+    const payload: ItemPayload = {
+      kind: 'EVENTO',
+      title,
+      description: description || null,
+      category: category || null,
+      isInPerson: inPerson,
+      canOverlap: !inPerson,
+      priority,
+      repeat,
+    };
+
+    if (priority === 'CRITICA') {
+      if (!date || !start || !end) {
+        alert('Para prioridad crítica, se requiere fecha y horas de inicio/fin.');
+        return;
+      }
+      payload.start = new Date(`${date}T${start}:00`).toISOString();
+      payload.end = new Date(`${date}T${end}:00`).toISOString();
+    } else if (priority === 'URGENTE' || priority === 'RELEVANTE') {
+      if (date && start && end) {
+        payload.start = new Date(`${date}T${start}:00`).toISOString();
+        payload.end = new Date(`${date}T${end}:00`).toISOString();
+      } else {
+        if (availWindow === 'Rango personalizado' && (!rangeStart || !rangeEnd)) {
+          alert('Selecciona un rango válido de fechas.');
+          return;
+        }
+        payload.window = WINDOW_MAP[availWindow];
+        if (availWindow === 'Rango personalizado') {
+          payload.windowStart = new Date(`${rangeStart}T00:00:00`).toISOString();
+          payload.windowEnd = new Date(`${rangeEnd}T23:59:59`).toISOString();
+        }
+      }
+    } else {
+      payload.status = 'WAITLIST';
+    }
 
     if (isEditing && editingEvent && editingEvent.kind === 'EVENTO') {
       await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar el evento');
@@ -677,10 +562,42 @@ export default function NewItemModal({
   };
 
   const submitTarea = async () => {
-    if (!validateTitle(title)) return;
+    if (!title.trim()) {
+      alert('El título es obligatorio.');
+      return;
+    }
 
-    const payload = buildScheduledPayload(state, 'TAREA');
-    if (!payload) return;
+    const payload: ItemPayload = {
+      kind: 'TAREA',
+      title,
+      description: description || null,
+      category: category || null,
+      isInPerson: inPerson,
+      canOverlap: !inPerson,
+      priority,
+      repeat,
+    };
+
+    if (priority === 'CRITICA') {
+      if (!date || !start || !end) {
+        alert('Para prioridad crítica, se requiere fecha y horas de inicio/fin.');
+        return;
+      }
+      payload.start = new Date(`${date}T${start}:00`).toISOString();
+      payload.end = new Date(`${date}T${end}:00`).toISOString();
+    } else if (priority === 'URGENTE' || priority === 'RELEVANTE') {
+      if (availWindow === 'Rango personalizado' && (!rangeStart || !rangeEnd)) {
+        alert('Selecciona un rango válido de fechas.');
+        return;
+      }
+      payload.window = WINDOW_MAP[availWindow];
+      if (availWindow === 'Rango personalizado') {
+        payload.windowStart = new Date(`${rangeStart}T00:00:00`).toISOString();
+        payload.windowEnd = new Date(`${rangeEnd}T23:59:59`).toISOString();
+      }
+    } else {
+      payload.status = 'WAITLIST';
+    }
 
     if (isEditing && editingEvent && editingEvent.kind === 'TAREA') {
       await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar la tarea');
@@ -690,11 +607,14 @@ export default function NewItemModal({
   };
 
   const submitSolicitud = async () => {
-    if (!validateTitle(title)) return;
+    if (!title.trim()) {
+      alert('El título es obligatorio.');
+      return;
+    }
 
     const payload: ItemPayload = {
       kind: 'SOLICITUD',
-      title: title,
+      title,
       description: description || null,
       category: category || null,
       isInPerson: true,
@@ -705,43 +625,50 @@ export default function NewItemModal({
       shareLink: isEditing && editingEvent ? editingEvent.shareLink || undefined : 'https://tuapp/solicitud/xxxx',
     };
 
-    if (!validateCustomRange(availWindow, rangeStart, rangeEnd)) return;
-    addWindowToPayload(payload, availWindow, rangeStart, rangeEnd);
+    if (availWindow === 'Rango personalizado' && (!rangeStart || !rangeEnd)) {
+      alert('Selecciona un rango válido de fechas.');
+      return;
+    }
+
+    payload.window = WINDOW_MAP[availWindow];
+    if (availWindow === 'Rango personalizado') {
+      payload.windowStart = new Date(`${rangeStart}T00:00:00`).toISOString();
+      payload.windowEnd = new Date(`${rangeEnd}T23:59:59`).toISOString();
+    }
 
     if (isEditing && editingEvent && editingEvent.kind === 'SOLICITUD') {
-      await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar la solicitud de disponibilidad');
+      await handleSubmit(`/api/events/${editingEvent.id}`, 'PATCH', payload, 'Error al actualizar la solicitud');
     } else {
-      await handleSubmit('/api/events', 'POST', payload, 'Error al crear la solicitud de disponibilidad');
+      await handleSubmit('/api/events', 'POST', payload, 'Error al crear la solicitud');
     }
   };
 
   if (!open) return null;
-  if (!currentTab) return null;
 
   const schedulingProps: CommonProps = {
-    inPerson: inPerson,
-    setInPerson: setInPerson,
-    priority: priority,
-    setPriority: setPriority,
-    date: date,
-    setDate: setDate,
-    start: start,
-    setStart: setStart,
-    end: end,
-    setEnd: setEnd,
-    repeat: repeat,
-    setRepeat: setRepeat,
-    availWindow: availWindow,
-    setAvailWindow: setAvailWindow,
-    rangeStart: rangeStart,
-    setRangeStart: setRangeStart,
-    rangeEnd: rangeEnd,
-    setRangeEnd: setRangeEnd,
+    inPerson,
+    setInPerson,
+    priority,
+    setPriority,
+    date,
+    setDate,
+    start,
+    setStart,
+    end,
+    setEnd,
+    repeat,
+    setRepeat,
+    availWindow,
+    setAvailWindow,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
   };
 
   const tabConfigs = [
     {
-      key: 'evento',
+      key: 'evento' as const,
       createLabel: 'Crear evento',
       editLabel: 'Editar evento',
       createBtn: 'Guardar evento',
@@ -749,7 +676,7 @@ export default function NewItemModal({
       action: submitEvento,
     },
     {
-      key: 'tarea',
+      key: 'tarea' as const,
       createLabel: 'Crear tarea',
       editLabel: 'Editar tarea',
       createBtn: 'Guardar tarea',
@@ -757,14 +684,14 @@ export default function NewItemModal({
       action: submitTarea,
     },
     {
-      key: 'disponibilidad',
+      key: 'disponibilidad' as const,
       createLabel: 'Solicitud de disponibilidad',
       editLabel: 'Editar solicitud',
       createBtn: 'Crear solicitud',
       editBtn: 'Actualizar solicitud',
       action: submitSolicitud,
     },
-  ] as const;
+  ];
 
   const enforcedTabKey: TabKey | null = isEditing && editingEvent
     ? (editingEvent.kind === 'EVENTO'
@@ -775,12 +702,12 @@ export default function NewItemModal({
     : null;
 
   const tabs = tabConfigs
-    .filter((tab) => !enforcedTabKey || tab.key === enforcedTabKey)
-    .map((tab) => ({
-      key: tab.key,
-      label: isEditing ? tab.editLabel : tab.createLabel,
-      action: tab.action,
-      btnText: isEditing ? tab.editBtn : tab.createBtn,
+    .filter((tabConfig) => !enforcedTabKey || tabConfig.key === enforcedTabKey)
+    .map((tabConfig) => ({
+      key: tabConfig.key,
+      label: isEditing ? tabConfig.editLabel : tabConfig.createLabel,
+      action: tabConfig.action,
+      btnText: isEditing ? tabConfig.editBtn : tabConfig.createBtn,
     }));
 
   const currentTab = tabs.find((t) => t.key === tab) ?? tabs[0];
@@ -788,7 +715,6 @@ export default function NewItemModal({
   return (
     <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="w-[720px] max-w-[95vw] max-h-[85vh] bg-surface rounded-2xl border border-ui shadow-xl flex flex-col overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-ui bg-surface sticky top-0 z-20">
           <h2 className="text-lg font-semibold text-gray-900">{isEditing ? 'Editar' : 'Crear'}</h2>
           <button
@@ -800,12 +726,11 @@ export default function NewItemModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-6 min-h-0">
-          {/* Tabs */}
           <div className="flex gap-2 border-b border-ui mb-6">
             {tabs.map((t) => (
               <button
                 key={t.key}
-                onClick={() => setTab(t.key as TabKey)}
+                onClick={() => setTab(t.key)}
                 className={`px-3 py-2 text-sm rounded-t border border-ui border-b-0 transition-all ${
                   tab === t.key ? 'bg-white font-medium' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
@@ -815,7 +740,6 @@ export default function NewItemModal({
             ))}
           </div>
 
-          {/* Formulario */}
           <div className="grid grid-cols-2 gap-4 mb-6">
             <Section title="Título (obligatorio)">
               <input
@@ -882,10 +806,8 @@ export default function NewItemModal({
               )}
             </div>
           </div>
-
         </div>
 
-        {/* Footer */}
         <div className="flex justify-end gap-2 px-6 py-4 border-t border-ui bg-surface">
           <button
             className="h-10 px-4 rounded border border-ui hover:bg-gray-50 transition-colors"
