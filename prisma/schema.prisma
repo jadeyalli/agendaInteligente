@@ -1,0 +1,135 @@
+//  Conexión a la base de datos
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// Generador de cliente Prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ===== Enums =====
+
+// Matriz Eisenhower
+enum Priority {
+  CRITICA // Urgente e Importante
+  URGENTE // Urgente, no Importante
+  RELEVANTE // Importante, no Urgente
+  OPCIONAL // Ni Urgente ni Importante
+}
+
+// Repetición
+enum RepeatRule {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+// Ventanas de disponibilidad para auto-agendado
+enum AvailabilityWindow {
+  NONE
+  PRONTO
+  SEMANA
+  MES
+  RANGO
+}
+
+// Tipo de registro
+enum EventKind {
+  EVENTO
+  TAREA
+  SOLICITUD
+}
+
+// ===== Modelos =====
+
+model User {
+  id     String             @id @default(cuid())
+  email  String             @unique
+  name   String?
+  events Event[]
+  slots  AvailabilitySlot[]
+  prefs  UserPrefs?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Event {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Básicos
+  kind        EventKind @default(EVENTO) // EVENTO | TAREA | SOLICITUD
+  title       String
+  description String?
+
+  // Fecha/hora
+  start           DateTime?
+  end             DateTime?
+  durationMinutes Int?
+
+  // Clasificación
+  priority Priority
+  category String? // Escuela, Trabajo, etc.
+
+  // Presencialidad / solapamiento
+  isInPerson Boolean @default(true)
+  canOverlap Boolean @default(false) // no presencial → true
+
+  // Repetición
+  repeat RepeatRule @default(NONE)
+
+  // Ventanas de disponibilidad (para URGENTE/RELEVANTE o SOLICITUD)
+  window      AvailabilityWindow @default(NONE)
+  windowStart DateTime?
+  windowEnd   DateTime?
+
+  // Colaboración (solicitudes)
+  shareLink String?
+
+  // Compatibilidad con tu esquema inicial
+  isFixed Boolean @default(false) // si no lo usas, puedes quitarlo
+
+  // Estado
+  status String @default("SCHEDULED") // SCHEDULED | WAITLIST | PENDING ...
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, start])
+}
+
+model AvailabilitySlot {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id])
+  dayOfWeek Int
+  startTime String
+  endTime   String
+}
+
+model UserPrefs {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  theme String @default("ESMERALDA")
+
+  labelCriticaName   String @default("Crítica")
+  labelUrgenteName   String @default("Urgente")
+  labelRelevanteName String @default("Relevante")
+  labelOpcionalName  String @default("Opcional")
+
+  colorCritica   String @default("#EF4444")
+  colorUrgente   String @default("#F59E0B")
+  colorRelevante String @default("#10B981")
+  colorOpcional  String @default("#9CA3AF")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

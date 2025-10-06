@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --accent: #10B981;
+  --bg: #F9FAFB;
+  --surface: #FFFFFF;
+  --border: #E5E7EB;
+  --text: #111827;
+
+  --critica: #EF4444;
+  --urgente: #F59E0B;
+  --relevante: #10B981;
+  --opcional: #9CA3AF;
+}
+
+/* utilidades propias (v4) */
+@utility badge {
+  @apply px-2 py-0.5 text-xs rounded;
+}
+@utility badge-critica   { background: var(--critica);   color: #fff; }
+@utility badge-urgente   { background: var(--urgente);   color: #111827; }
+@utility badge-relevante { background: var(--relevante); color: #fff; }
+@utility badge-opcional  { background: var(--opcional);  color: #111827; }
+
+.bg-surface { background: var(--surface); }
+.bg-app     { background: var(--bg); }
+.text-body  { color: var(--text); }
+.border-ui  { border-color: var(--border); }
