@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const file = form.get('file');
-    const mode = (form.get('mode') as string) || 'RESPECT';
+    const mode = (form.get('mode') as string) || 'REMINDER';
     const calendarName = (form.get('calendarName') as string) || 'Personal';
     // Si tienes auth real, reemplaza por usuario actual:
     const userEmail = (form.get('userEmail') as string) || 'demo@local';
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     const { importedIds } = await importIcsFromText(icsText, {
       userEmail,
       calendarName,
-      mode: mode === 'SMART' ? 'SMART' : 'RESPECT',
+      mode: mode === 'SMART' ? 'SMART' : 'REMINDER',
       expandMonths: 6,
     });
 
