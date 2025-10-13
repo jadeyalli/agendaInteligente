@@ -183,6 +183,8 @@ function endOfYearOf(d: Date): Date {
 type BusyInterval = { start: Date; end: Date };
 
 const DEFAULT_DURATION_MINUTES = 60;
+const WORK_START_HOUR = 5;
+const WORK_END_HOUR = 23;
 
 function ensurePositiveDurationMs(event: Event): number {
   if (event.start && event.end) {
@@ -195,6 +197,50 @@ function ensurePositiveDurationMs(event: Event): number {
 
 function isUnsetDate(value: Date | null | undefined): boolean {
   return !value || value.getTime() === 0;
+}
+
+function startOfWorkingDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), WORK_START_HOUR, 0, 0, 0);
+}
+
+function endOfWorkingDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), WORK_END_HOUR, 0, 0, 0);
+}
+
+function earliestSchedulingStart(): Date {
+  const now = new Date();
+  const todayStart = startOfWorkingDay(now);
+  return now.getTime() > todayStart.getTime() ? now : todayStart;
+}
+
+function moveToNextWorkingDay(date: Date): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + 1);
+  next.setHours(WORK_START_HOUR, 0, 0, 0);
+  const earliest = earliestSchedulingStart();
+  return next.getTime() < earliest.getTime() ? earliest : next;
+}
+
+function clampToWorkingHours(date: Date): Date {
+  const earliest = earliestSchedulingStart();
+  let candidate = new Date(Math.max(date.getTime(), earliest.getTime()));
+
+  while (true) {
+    const dayStart = startOfWorkingDay(candidate);
+    const dayEnd = endOfWorkingDay(candidate);
+
+    if (candidate.getTime() < dayStart.getTime()) {
+      candidate = dayStart;
+      continue;
+    }
+
+    if (candidate.getTime() >= dayEnd.getTime()) {
+      candidate = moveToNextWorkingDay(candidate);
+      continue;
+    }
+
+    return candidate;
+  }
 }
 
 function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | null {
@@ -243,38 +289,57 @@ function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | n
     }
   }
 
-  if (end && end.getTime() <= start.getTime()) {
+  const clampedStart = clampToWorkingHours(start);
+
+  if (end && end.getTime() <= clampedStart.getTime()) {
     return null;
   }
 
-  return { start, end };
+  return { start: clampedStart, end };
 }
 
 function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: BusyInterval[]): Date | null {
-  let cursor = new Date(start);
   const sorted = [...busy].sort((a, b) => a.start.getTime() - b.start.getTime());
+  let cursor = clampToWorkingHours(start);
+  const limit = end ? end.getTime() : Number.POSITIVE_INFINITY;
 
-  for (const interval of sorted) {
-    if (interval.end.getTime() <= cursor.getTime()) {
-      continue;
-    }
-
-    if (end && cursor.getTime() + durationMs > end.getTime()) {
-      return null;
-    }
-
-    if (interval.start.getTime() >= cursor.getTime() + durationMs) {
-      return cursor;
-    }
-
-    cursor = new Date(Math.max(cursor.getTime(), interval.end.getTime()));
-  }
-
-  if (end && cursor.getTime() + durationMs > end.getTime()) {
+  if (cursor.getTime() >= limit) {
     return null;
   }
 
-  return cursor;
+  while (cursor.getTime() + durationMs <= limit) {
+    const dayEnd = endOfWorkingDay(cursor);
+
+    if (cursor.getTime() + durationMs > dayEnd.getTime()) {
+      cursor = moveToNextWorkingDay(cursor);
+      if (cursor.getTime() >= limit) {
+        return null;
+      }
+      continue;
+    }
+
+    let conflict: BusyInterval | null = null;
+    for (const interval of sorted) {
+      if (interval.end.getTime() <= cursor.getTime()) {
+        continue;
+      }
+
+      if (interval.start.getTime() >= cursor.getTime() + durationMs) {
+        break;
+      }
+
+      conflict = interval;
+      break;
+    }
+
+    if (!conflict) {
+      return cursor;
+    }
+
+    cursor = clampToWorkingHours(new Date(Math.max(conflict.end.getTime(), cursor.getTime())));
+  }
+
+  return null;
 }
 
 function upsertInterval(list: BusyInterval[], interval: BusyInterval): BusyInterval[] {
@@ -296,27 +361,41 @@ function priorityWeight(p: Priority): number {
   }
 }
 
-async function preemptConflictingEvents(userId: string, criticalEvents: Event[]) {
-  for (const critical of criticalEvents) {
-    if (critical.priority !== 'CRITICA' || !critical.start || !critical.end) continue;
+function lowerPriorityTargets(priority: Priority): Priority[] {
+  switch (priority) {
+    case 'CRITICA':
+      return ['URGENTE', 'RELEVANTE'];
+    case 'URGENTE':
+      return ['RELEVANTE'];
+    default:
+      return [];
+  }
+}
+
+async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
+  for (const current of newEvents) {
+    if (current.kind !== 'EVENTO' || !current.start || !current.end) continue;
+
+    const prioritiesToMove = lowerPriorityTargets(current.priority);
+    if (!prioritiesToMove.length) continue;
 
     const overlapping = await prisma.event.findMany({
       where: {
         userId,
-        id: { not: critical.id },
+        id: { not: current.id },
         kind: 'EVENTO',
         participatesInScheduling: true,
         isFixed: false,
         canOverlap: false,
-        priority: { in: ['URGENTE', 'RELEVANTE'] },
-        start: { lt: critical.end },
-        end: { gt: critical.start },
+        priority: { in: prioritiesToMove },
+        start: { lt: current.end },
+        end: { gt: current.start },
       },
     });
 
     if (!overlapping.length) continue;
 
-    const toMoveIds = new Set(overlapping.map((e) => e.id));
+    const toMoveIds = new Set(overlapping.map((event) => event.id));
 
     const blockingEvents = await prisma.event.findMany({
       where: {
@@ -330,8 +409,8 @@ async function preemptConflictingEvents(userId: string, criticalEvents: Event[])
     });
 
     let busy: BusyInterval[] = blockingEvents
-      .filter((e) => !toMoveIds.has(e.id) && e.start && e.end)
-      .map((e) => ({ start: e.start!, end: e.end! }));
+      .filter((event) => !toMoveIds.has(event.id) && event.start && event.end)
+      .map((event) => ({ start: event.start!, end: event.end! }));
 
     const sortedOverlaps = [...overlapping].sort((a, b) => {
       const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
@@ -389,7 +468,7 @@ async function preemptConflictingEvents(userId: string, criticalEvents: Event[])
     }
 
     if (updates.length) {
-      await prisma.$transaction(updates.map((u) => prisma.event.update({ where: { id: u.id }, data: u.data })));
+      await prisma.$transaction(updates.map((update) => prisma.event.update({ where: { id: update.id }, data: update.data })));
     }
   }
 }
@@ -775,7 +854,7 @@ export async function POST(req: Request) {
     if (data.kind === 'EVENTO') {
       const created = await createEventSeries(user.id, data);
       await scheduleFlexibleEvents(user.id, created);
-      await preemptConflictingEvents(user.id, created);
+      await preemptLowerPriorityEvents(user.id, created);
       const ids = created.map((item) => item.id);
       const refreshed = await prisma.event.findMany({ where: { id: { in: ids } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
