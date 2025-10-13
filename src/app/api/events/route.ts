@@ -613,7 +613,7 @@ const EventCreateSchema_EVENTO = z.object({
   description: z.string().trim().nullish(),
   category: z.string().nullish(),
 
-  isInPerson: z.boolean(),
+  isInPerson: z.boolean().optional().default(true),
   canOverlap: z.boolean().optional().default(false),
   priority: z.nativeEnum(Priority).default('RELEVANTE'),
 
