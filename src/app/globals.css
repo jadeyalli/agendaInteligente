@@ -1,9 +1,36 @@
 @import "tailwindcss";
 
+
+/* neutrales por defecto (pastel) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f7f7f9;
+  --surface: #ffffff;
+  --fg: #0f172a;
+  --muted: #64748b;
+
+  --prio-critica: #bfefa2;
+  --prio-urgente: #f4d283;
+  --prio-relevante: #ffb294;
+  --prio-opcional: #ff9fc2;
+
+  --prio-critica-fg: #0f172a;
+  --prio-urgente-fg: #0f172a;
+  --prio-relevante-fg: #0f172a;
+  --prio-opcional-fg: #0f172a;
 }
+
+/* helpers */
+.app-bg { background: var(--bg); color: var(--fg); }
+.surface { background: var(--surface); }
+.text-fg { color: var(--fg); }
+.text-muted { color: var(--muted); }
+
+/* FullCalendar: usa variables del tema por prioridad */
+.fc .fc-event.prio-CRITICA { background: var(--prio-critica) !important; border-color: var(--prio-critica) !important; color: var(--prio-critica-fg) !important; }
+.fc .fc-event.prio-URGENTE { background: var(--prio-urgente) !important; border-color: var(--prio-urgente) !important; color: var(--prio-urgente-fg) !important; }
+.fc .fc-event.prio-RELEVANTE { background: var(--prio-relevante) !important; border-color: var(--prio-relevante) !important; color: var(--prio-relevante-fg) !important; }
+.fc .fc-event.prio-OPCIONAL { background: var(--prio-opcional) !important; border-color: var(--prio-opcional) !important; color: var(--prio-opcional-fg) !important; }
+
 
 @theme inline {
   --color-background: var(--background);

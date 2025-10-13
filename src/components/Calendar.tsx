@@ -7,16 +7,16 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
+
 import CreateEditModal from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
+import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
 
+import { THEMES, currentTheme } from '@/theme/themes';
 
 export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
 export type CalendarMeta = { view: ViewId; title: string; start: Date; end: Date };
-
-export type CalendarProps = {
-  onViewChange?: (meta: CalendarMeta) => void;
-};
+export type CalendarProps = { onViewChange?: (meta: CalendarMeta) => void };
 
 type EventRow = {
   id: string;
@@ -24,7 +24,7 @@ type EventRow = {
   title: string;
   description?: string | null;
   category?: string | null;
-  priority?: string | null;
+  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | null;
 
   // tiempo
   start?: string | null;
@@ -41,12 +41,32 @@ type EventRow = {
 };
 
 export default function Calendar({ onViewChange }: CalendarProps) {
+  // === tema (escucha cambios emitidos por la página) ===
+  const [theme, setTheme] = useState(currentTheme());
+  useEffect(() => {
+    const onChange = () => setTheme(currentTheme());
+    window.addEventListener('ai-theme-change', onChange as any);
+    return () => window.removeEventListener('ai-theme-change', onChange as any);
+  }, []);
+
+  // === estado calendario ===
   const [view, setView] = useState<ViewId>('timeGridWeek');
   const [weekends, setWeekends] = useState(true);
   const [title, setTitle] = useState<string>('');
+
   const [openCreate, setOpenCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  const [openEdit, setOpenEdit] = useState(false);
+  const [editInitial, setEditInitial] = useState<any>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [openImport, setOpenImport] = useState(false);
+
+  // Vista previa
+  const [openPreview, setOpenPreview] = useState(false);
+  const [selected, setSelected] = useState<PreviewRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // datos del backend y rango visible
   const [rows, setRows] = useState<EventRow[]>([]);
@@ -59,8 +79,12 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   // evita loops al cambiar vista/rango
   const lastMetaRef = useRef<{ view: ViewId; title: string; startMs: number; endMs: number } | null>(null);
 
-  // Helpers
-  const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86400000);
+  // helper: YYYY-MM-DD
+  const toDateOnly = (d: string | Date | null | undefined) => {
+    if (!d) return null;
+    const s = typeof d === 'string' ? d : (d as Date).toISOString();
+    return s.slice(0, 10);
+  };
 
   // ====== Cargar eventos del backend (usuario demo) ======
   async function loadEvents() {
@@ -77,26 +101,21 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
   }
 
+  useEffect(() => { loadEvents(); }, []);
 
-  useEffect(() => {
-    loadEvents();
-  }, []);
-
-  // ====== Crear desde el modal y refrescar ======
+  // ====== Crear desde el modal ======
   async function handleCreateFromModal(payload: any) {
     try {
       setCreating(true);
       const res = await fetch('/api/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo crear');
       }
       setOpenCreate(false);
-      await loadEvents(); // refresca
+      await loadEvents();
     } catch (e: any) {
       alert(e.message || 'Error al crear');
     } finally {
@@ -104,17 +123,87 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
   }
 
-  // ====== Mapeo a FullCalendar (incluye ventanas) ======
-  // helper: extrae 'YYYY-MM-DD' de un ISO u objeto Date
-  const toDateOnly = (d: string | Date | null | undefined) => {
-    if (!d) return null;
-    const s = typeof d === 'string' ? d : (d as Date).toISOString();
-    return s.slice(0, 10); // YYYY-MM-DD
-  };
+  // ====== Editar desde el modal ======
+  async function handleEditFromModal(payload: any) {
+    if (!editingId) return;
+    try {
+      setCreating(true);
+      const res = await fetch(`/api/events?id=${encodeURIComponent(editingId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'No se pudo actualizar');
+      }
+      setOpenEdit(false);
+      setEditingId(null);
+      await loadEvents();
+    } catch (e: any) {
+      alert(e.message || 'Error al actualizar');
+    } finally {
+      setCreating(false);
+    }
+  }
 
+  // ====== Eliminar ======
+  async function handleDelete(e: PreviewRow) {
+    try {
+      setDeleting(true);
+      const res = await fetch(`/api/events?id=${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'No se pudo eliminar');
+      }
+      setOpenPreview(false);
+      setSelected(null);
+      await loadEvents();
+    } catch (err: any) {
+      alert(err.message || 'Error al eliminar');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // Mapea EventRow a los valores iniciales de CreateEditModal
+  function mapRowToEditInitial(row: EventRow) {
+    if (row.kind === 'TAREA') {
+      return {
+        kind: 'TAREA',
+        title: row.title,
+        description: row.description ?? '',
+        category: row.category ?? '',
+        repeat: 'NONE',
+        dueDate: row.dueDate ? row.dueDate.slice(0, 10) : '',
+      };
+    }
+    const date = row.start ? row.start.slice(0, 10) : '';
+    const timeStart = row.start ? new Date(row.start).toISOString().slice(11, 16) : '';
+    const timeEnd = row.end ? new Date(row.end).toISOString().slice(11, 16) : '';
+    return {
+      kind: 'EVENTO',
+      title: row.title,
+      description: row.description ?? '',
+      category: row.category ?? '',
+      isInPerson: true,
+      canOverlap: false,
+      priority: (row.priority ?? 'RELEVANTE') as any,
+      repeat: 'NONE',
+      window: 'NONE',
+      date,
+      timeStart,
+      timeEnd,
+    };
+  }
+
+  // ====== Mapeo a FullCalendar con colores del tema ======
   const fcEvents = useMemo(() => {
     if (!rows.length) return [];
     const out: any[] = [];
+
+    const labelColors = THEMES[theme].labels;
+    const labelFgs = THEMES[theme].labelsFg;
 
     for (const row of rows) {
       const kind = row.kind || 'EVENTO';
@@ -122,13 +211,13 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       const endStr = row.end || null;
       const dueStr = row.dueDate || null;
       const windowCode = row.window || 'NONE';
+      const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL';
+      const classNames = [`prio-${p}`];
 
       // 1) Eventos con start/end
       if (startStr) {
         if (row.isAllDay) {
-          // 🔵 all-day → usa YYYY-MM-DD para evitar desfases por zona horaria
           const sDay = toDateOnly(startStr)!;
-          // FullCalendar espera end EXCLUSIVO en all-day; si viene un end, lo paso a date-only
           const eDay = endStr ? toDateOnly(endStr)! : undefined;
           out.push({
             id: row.id,
@@ -136,6 +225,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             start: sDay,
             end: eDay,
             allDay: true,
+            classNames,
+            color: labelColors[p],
+            textColor: labelFgs[p],
             extendedProps: { kind, priority: row.priority, raw: row },
           });
         } else {
@@ -145,6 +237,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             start: startStr,
             end: endStr ?? undefined,
             allDay: !!row.isAllDay,
+            classNames,
+            color: labelColors[p],
+            textColor: labelFgs[p],
             extendedProps: { kind, priority: row.priority, raw: row },
           });
         }
@@ -158,12 +253,15 @@ export default function Calendar({ onViewChange }: CalendarProps) {
           title: `🗒️ ${row.title}`,
           start: toDateOnly(dueStr)!,
           allDay: true,
+          classNames,
+          color: labelColors[p],
+          textColor: labelFgs[p],
           extendedProps: { kind, priority: row.priority, raw: row },
         });
         continue;
       }
 
-      // 3) Ventanas (si quieres ver “algo” aunque no haya fechas concretas)
+      // 3) Ventanas visuales opcionales
       if (windowCode && windowCode !== 'NONE') {
         if (windowCode === 'RANGO' && row.windowStart) {
           const sDay = toDateOnly(row.windowStart)!;
@@ -193,8 +291,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
 
     return out;
-  }, [rows, visibleRange]);
-
+  }, [rows, visibleRange, theme]);
 
   // Navegación
   const changeView = (v: ViewId) => { setView(v); api()?.changeView(v); };
@@ -202,7 +299,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const next = () => api()?.next();
   const today = () => api()?.today();
 
-  // Estilos de botones
+  // Estilos botones
   const viewBtn = (active: boolean) =>
     [
       'inline-flex items-center justify-center rounded-lg border px-3 py-1.5 text-sm font-medium transition',
@@ -299,19 +396,20 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             selectMirror
             editable={false}
             views={{
-              multiMonthYear: {
-                type: 'multiMonth',
-                duration: { years: 1 },
-                multiMonthMaxColumns: 4,
-              },
+              multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
             }}
             dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
             slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
             weekNumberCalculation="ISO"
 
-            /* 👇 Ahora usamos la lista ya mapeada (incluye ventanas) */
             events={fcEvents}
 
+            eventClick={(info) => {
+              const raw = info.event.extendedProps?.raw as PreviewRow | undefined;
+              if (!raw) return;
+              setSelected(raw);
+              setOpenPreview(true);
+            }}
             dateClick={(arg) => {
               api()?.changeView('timeGridDay', arg.date);
               setView('timeGridDay');
@@ -336,14 +434,13 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
               if (!changed) return;
 
-              // Título + meta para dashboard
               setTitle(newTitle);
               onViewChange?.({ view: vtype, title: newTitle, start, end });
-              lastMetaRef.current = { view: vtype, title: newTitle, startMs, endMs };
-
-              // Guardamos el rango visible para pintar ventanas PRONTO/SEMANA/MES
               setVisibleRange({ start, end });
+
+              lastMetaRef.current = { view: vtype, title: newTitle, startMs, endMs };
             }}
+
             eventContent={(arg) => {
               const timeText = arg.timeText ? `${arg.timeText} ` : '';
               return (
@@ -357,9 +454,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
               if (info.isToday) info.el.classList.add('fc-is-today-strong');
             }}
           />
-          {loading ? (
-            <div className="mt-2 text-sm text-slate-500">Cargando eventos…</div>
-          ) : null}
+          {loading ? <div className="mt-2 text-sm text-slate-500">Cargando eventos…</div> : null}
         </div>
       </div>
 
@@ -371,13 +466,39 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         onSubmit={handleCreateFromModal}
         onClose={() => setOpenCreate(false)}
       />
+
+      {/* Modal Editar */}
+      <CreateEditModal
+        open={openEdit}
+        mode="edit"
+        initialTab="evento"
+        initialValues={editInitial ?? undefined}
+        onSubmit={handleEditFromModal}
+        onClose={() => {
+          setOpenEdit(false);
+          setEditingId(null);
+        }}
+      />
+
       <IcsImportModal
         open={openImport}
         onClose={() => setOpenImport(false)}
-        onImported={async (count) => {
-          // después de importar, recarga eventos para verlos
-          await loadEvents();
+        onImported={async () => { await loadEvents(); }}
+      />
+
+      {/* Vista previa */}
+      <EventPreviewModal
+        open={openPreview}
+        event={selected}
+        deleting={deleting}
+        onClose={() => { setOpenPreview(false); setSelected(null); }}
+        onEdit={(e) => {
+          setOpenPreview(false);
+          setEditingId(e.id);
+          setEditInitial(mapRowToEditInitial(e as any));
+          setOpenEdit(true);
         }}
+        onDelete={(e) => { void handleDelete(e); }}
       />
     </div>
   );

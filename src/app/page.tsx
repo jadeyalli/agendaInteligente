@@ -10,20 +10,19 @@ import {
   Settings,
   Menu,
   X,
-  Sun,
-  Moon,
+  Palette,
 } from 'lucide-react';
+
+import { THEMES, type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
 
 /** Tipos que recibiremos desde el calendario */
 type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
 type CalendarMeta = { view: ViewId; title: string; start: Date; end: Date };
 
 type CalendarProps = {
-  /** El calendario nos avisará cuando cambie de vista o rango */
   onViewChange?: (meta: CalendarMeta) => void;
 };
 
-// IMPORTA TU CALENDARIO (ajusta la ruta si es necesario)
 const Calendar = dynamic<CalendarProps>(
   () => import('@/components/Calendar').then((m) => m.default ?? m),
   { ssr: false },
@@ -35,16 +34,17 @@ const NAV: NavItem[] = [
   { href: '/', label: 'Calendario', icon: <CalendarIcon className="h-4 w-4" />, active: true },
   { href: '/tasks', label: 'Tareas', icon: <ListTodo className="h-4 w-4" /> },
   { href: '/requests', label: 'Solicitudes', icon: <ClipboardList className="h-4 w-4" /> },
-  // 👇 Quitamos “Reportes” mientras trabajamos
-  // { href: '/reports', label: 'Reportes', icon: <BarChart3 className="h-4 w-4" /> },
   { href: '/settings', label: 'Configuración', icon: <Settings className="h-4 w-4" /> },
 ];
 
 export default function DashboardHomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dark, setDark] = useState(false);
 
-  // Estado que refleja la vista actual del calendario (día/semana/mes/año)
+  // === Tema ===
+  const [theme, setTheme] = useState<ThemeKey>(currentTheme());
+  useEffect(() => { applyTheme(theme); }, [theme]);
+
+  // Meta del calendario (para tarjetas)
   const [calMeta, setCalMeta] = useState<CalendarMeta>({
     view: 'timeGridWeek',
     title: '',
@@ -52,32 +52,14 @@ export default function DashboardHomePage() {
     end: new Date(),
   });
 
-  // Tema persistente
-  useEffect(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
-    const isDark = saved ? saved === 'dark' : window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-    document.documentElement.classList.toggle('dark', isDark);
-    setDark(isDark);
-  }, []);
-  const toggleTheme = () => {
-    setDark((d) => {
-      const nd = !d;
-      document.documentElement.classList.toggle('dark', nd);
-      localStorage.setItem('theme', nd ? 'dark' : 'light');
-      return nd;
-    });
-  };
-
-  // Clases reutilizables
   const linkClass = (active?: boolean) =>
     [
       'flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition',
       active
         ? 'bg-slate-900 text-white'
-        : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
+        : 'text-slate-700 hover:bg-slate-100',
     ].join(' ');
 
-  // Etiquetas para tarjetas según la vista del calendario
   const scopeWord = useMemo(() => {
     switch (calMeta.view) {
       case 'timeGridDay':
@@ -94,13 +76,16 @@ export default function DashboardHomePage() {
   }, [calMeta.view]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
       {/* Layout principal */}
-      <div className="flex">
-        {/* Sidebar desktop */}
-        <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:block">
+      <div className="flex items-start">
+        {/* Sidebar desktop (STICKY) */}
+        <aside
+          aria-label="Menú lateral"
+          className="hidden lg:block lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto w-64 shrink-0 border-r border-slate-200 bg-[var(--surface)] p-4"
+        >
           <div className="mb-6 flex items-center gap-2">
-            <div className="h-8 w-8 rounded-xl bg-slate-900 dark:bg-slate-100" />
+            <div className="h-8 w-8 rounded-xl bg-slate-900" />
             <div className="text-lg font-semibold">Agenda Inteligente</div>
           </div>
 
@@ -112,12 +97,6 @@ export default function DashboardHomePage() {
               </Link>
             ))}
           </nav>
-
-          {/* 👇 Quitamos “Consejo” mientras trabajamos */}
-          {/* <div className="mt-8 rounded-xl border border-slate-200 p-3 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
-            <p className="font-semibold mb-1">Consejo</p>
-            <p>Pulsa “Crear” en el calendario para añadir eventos, tareas o solicitudes.</p>
-          </div> */}
         </aside>
 
         {/* Drawer móvil */}
@@ -128,14 +107,14 @@ export default function DashboardHomePage() {
               onClick={() => setSidebarOpen(false)}
               aria-hidden
             />
-            <aside className="absolute left-0 top-0 h-full w-72 border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <aside className="absolute left-0 top-0 h-full w-72 border-r border-slate-200 bg-[var(--surface)] p-4">
               <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-xl bg-slate-900 dark:bg-slate-100" />
+                  <div className="h-8 w-8 rounded-xl bg-slate-900" />
                   <div className="text-lg font-semibold">Agenda</div>
                 </div>
                 <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100"
                   onClick={() => setSidebarOpen(false)}
                   aria-label="Cerrar menú"
                 >
@@ -162,66 +141,68 @@ export default function DashboardHomePage() {
         {/* Columna derecha (header + main + footer) */}
         <div className="flex min-h-screen grow flex-col">
           {/* Header */}
-          <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/70 px-4 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
+          <header className="sticky top-0 z-40 border-b border-slate-200 bg-[var(--surface)] px-4 py-2 backdrop-blur">
             <div className="mx-auto flex max-w-7xl items-center gap-3">
               <button
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800 lg:hidden"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100 lg:hidden"
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Abrir menú"
               >
                 <Menu className="h-4 w-4" />
               </button>
 
-              {/* 👇 Quitamos buscador y notificaciones */}
+              {/* Selector de tema (reemplaza dark-mode) */}
               <div className="ml-auto flex items-center gap-2">
-                <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800"
-                  onClick={toggleTheme}
-                  aria-label="Cambiar tema"
-                  title="Cambiar tema"
-                >
-                  {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </button>
-                <div className="ml-1 h-8 w-8 rounded-full bg-gradient-to-br from-slate-300 to-slate-500 dark:from-slate-600 dark:to-slate-400" />
+                <div className="relative">
+                  <select
+                    value={theme}
+                    onChange={(e) => setTheme(e.target.value as ThemeKey)}
+                    aria-label="Seleccionar tema"
+                    className="appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-8 text-sm text-slate-800 hover:bg-slate-50"
+                    title="Tema"
+                  >
+                    <option value="pastel">Pastel</option>
+                    <option value="funny">Funny</option>
+                    <option value="cool">Cool</option>
+                    <option value="autumn">Autumn</option>
+                    <option value="mono">Mono</option>
+                  </select>
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-500">
+                    <Palette className="h-4 w-4" />
+                  </span>
+                </div>
+                <div className="ml-1 h-8 w-8 rounded-full bg-gradient-to-br from-slate-300 to-slate-500" />
               </div>
             </div>
           </header>
 
           {/* Main */}
           <main className="mx-auto w-full max-w-7xl grow px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
-            {/* Tarjetas métricas: quitamos “Solicitudes” y títulos dinámicos según vista */}
             <section className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs text-slate-500">
-                  {scopeWord} eventos programados
-                </p>
+              <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4">
+                <p className="text-xs text-[var(--muted)]">{scopeWord} eventos programados</p>
                 <p className="mt-1 text-2xl font-semibold">0</p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs text-slate-500">
-                  {scopeWord} tareas
-                </p>
+              <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4">
+                <p className="text-xs text-[var(--muted)]">{scopeWord} tareas</p>
                 <p className="mt-1 text-2xl font-semibold">0</p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs text-slate-500">Productividad</p>
+              <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4">
+                <p className="text-xs text-[var(--muted)]">Productividad</p>
                 <p className="mt-1 text-2xl font-semibold">—</p>
               </div>
             </section>
 
-            {/* Calendario (nos notifica la vista actual) */}
             <section>
-              <Calendar
-                onViewChange={(meta) => setCalMeta(meta)}
-              />
+              <Calendar onViewChange={(meta) => setCalMeta(meta)} />
             </section>
           </main>
 
           {/* Footer */}
-          <footer className="mt-auto border-t border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+          <footer className="mt-auto border-t border-slate-200 bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
             <div className="mx-auto flex max-w-7xl items-center justify-between">
-              <span>© {new Date().getFullYear()} Agenda Inteligente</span>
-              <span className="hidden sm:inline">Hecho con Next.js, React y Tailwind</span>
+              <span>{new Date().getFullYear()} Agenda Inteligente</span>
+              <span className="hidden sm:inline">Incremento 1 - :)</span>
             </div>
           </footer>
         </div>
