@@ -389,8 +389,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             stickyHeaderDates
             height="auto"
             slotDuration="00:30:00"
-            slotMinTime="00:00:00"
-            slotMaxTime="24:00:00"
+            slotMinTime="05:00:00"
+            slotMaxTime="23:00:00"
             allDaySlot
             selectable
             selectMirror
