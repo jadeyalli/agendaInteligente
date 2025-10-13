@@ -332,6 +332,8 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
     const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
     const isOpcional = f.priority === "OPCIONAL";
     const canSubmit = f.title.trim().length > 0 && (!isCritica || (f.date && f.timeStart && f.timeEnd));
+    const CATEGORIES = ["Escuela", "Trabajo", "Personal"] as const;
+    type Category = (typeof CATEGORIES)[number];
 
     return (
         <div className="space-y-4">
@@ -340,8 +342,17 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
                     <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Nombre del evento" />
                 </Field>
                 <Field label="Categoría" labelIcon={<FolderOpen className="h-4 w-4" />}>
-                    <Input value={f.category} onChange={(e) => set({ ...f, category: e.target.value })} placeholder="Escuela, Trabajo, Personal…" />
+                    <Select
+                        value={f.category ?? ""}
+                        onChange={(e) => set({ ...f, category: e.target.value })}
+                    >
+                        <option value="" disabled>Selecciona una categoría…</option>
+                        <option value="Escuela">Escuela</option>
+                        <option value="Trabajo">Trabajo</option>
+                        <option value="Personal">Personal</option>
+                    </Select>
                 </Field>
+
             </Row>
 
             <Field label="Descripción" labelIcon={<FileText className="h-4 w-4" />}>
@@ -494,7 +505,15 @@ const CrearTarea: React.FC<{ initial?: Partial<TaskForm>; onSubmit: (data: any) 
                     <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Nombre de la tarea" />
                 </Field>
                 <Field label="Categoría" labelIcon={<FolderOpen className="h-4 w-4" />}>
-                    <Input value={f.category} onChange={(e) => set({ ...f, category: e.target.value })} placeholder="Escuela, Trabajo, Personal…" />
+                    <Select
+                        value={f.category ?? ""}
+                        onChange={(e) => set({ ...f, category: e.target.value })}
+                    >
+                        <option value="" disabled>Selecciona una categoría…</option>
+                        <option value="Escuela">Escuela</option>
+                        <option value="Trabajo">Trabajo</option>
+                        <option value="Personal">Personal</option>
+                    </Select>
                 </Field>
             </Row>
             <Field label="Descripción" labelIcon={<FileText className="h-4 w-4" />}>
@@ -543,7 +562,15 @@ const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data
                     <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Nombre de la solicitud" />
                 </Field>
                 <Field label="Categoría" labelIcon={<FolderOpen className="h-4 w-4" />}>
-                    <Input value={f.category} onChange={(e) => set({ ...f, category: e.target.value })} placeholder="Escuela, Trabajo, Personal…" />
+                    <Select
+                        value={f.category ?? ""}
+                        onChange={(e) => set({ ...f, category: e.target.value })}
+                    >
+                        <option value="" disabled>Selecciona una categoría…</option>
+                        <option value="Escuela">Escuela</option>
+                        <option value="Trabajo">Trabajo</option>
+                        <option value="Personal">Personal</option>
+                    </Select>
                 </Field>
             </Row>
             <Field label="Descripción" labelIcon={<FileText className="h-4 w-4" />} >
