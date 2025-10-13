@@ -193,6 +193,10 @@ function ensurePositiveDurationMs(event: Event): number {
   return minutes * 60 * 1000;
 }
 
+function isUnsetDate(value: Date | null | undefined): boolean {
+  return !value || value.getTime() === 0;
+}
+
 function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | null {
   const now = new Date();
   const candidates: Date[] = [];
@@ -390,6 +394,93 @@ async function preemptConflictingEvents(userId: string, criticalEvents: Event[])
   }
 }
 
+async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
+  const toSchedule = candidates.filter(
+    (event) =>
+      event.kind === 'EVENTO' &&
+      event.participatesInScheduling &&
+      !event.isFixed &&
+      !event.canOverlap &&
+      isUnsetDate(event.start)
+  );
+
+  if (!toSchedule.length) return;
+
+  const candidateIds = new Set(toSchedule.map((event) => event.id));
+
+  const blockingEvents = await prisma.event.findMany({
+    where: {
+      userId,
+      kind: 'EVENTO',
+      participatesInScheduling: true,
+      start: { not: null },
+      end: { not: null },
+      OR: [{ isFixed: true }, { canOverlap: false }],
+      NOT: { id: { in: Array.from(candidateIds) } },
+    },
+  });
+
+  let busy: BusyInterval[] = blockingEvents
+    .filter((event) => event.start && event.end)
+    .map((event) => ({ start: event.start!, end: event.end! }));
+
+  const sorted = [...toSchedule].sort((a, b) => {
+    const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
+    if (diff !== 0) return diff;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+
+  const updates: { id: string; data: Prisma.EventUpdateInput }[] = [];
+
+  for (const event of sorted) {
+    const window = schedulingWindowOf(event);
+    if (!window) {
+      updates.push({
+        id: event.id,
+        data: {
+          start: null,
+          end: null,
+          status: 'WAITLIST',
+          participatesInScheduling: false,
+        },
+      });
+      continue;
+    }
+
+    const durationMs = ensurePositiveDurationMs(event);
+    const nextSlot = findNextSlot(durationMs, window.start, window.end, busy);
+
+    if (!nextSlot) {
+      updates.push({
+        id: event.id,
+        data: {
+          start: null,
+          end: null,
+          status: 'WAITLIST',
+          participatesInScheduling: false,
+        },
+      });
+      continue;
+    }
+
+    const nextEnd = new Date(nextSlot.getTime() + durationMs);
+    updates.push({
+      id: event.id,
+      data: {
+        start: nextSlot,
+        end: nextEnd,
+        status: 'SCHEDULED',
+        participatesInScheduling: true,
+      },
+    });
+    busy = upsertInterval(busy, { start: nextSlot, end: nextEnd });
+  }
+
+  if (updates.length) {
+    await prisma.$transaction(updates.map((update) => prisma.event.update({ where: { id: update.id }, data: update.data })));
+  }
+}
+
 /** Genera todas las ocurrencias según regla y límites:
  * - DAILY/WEEKLY/MONTHLY: hasta el 31 de diciembre del año base
  * - YEARLY: hasta año base + 2 (inclusive)
@@ -485,19 +576,24 @@ const EventCreateSchema = z.discriminatedUnion('kind', [
 
 /** ============== creación series EVENTO ============== */
 async function createEventSeries(userId: string, data: z.infer<typeof EventCreateSchema_EVENTO>) {
+  const normalizedStart = data.start && !isUnsetDate(data.start) ? data.start : null;
+  const normalizedEnd = data.end && !isUnsetDate(data.end) ? data.end : null;
+  const normalizedWindowStart = data.windowStart && !isUnsetDate(data.windowStart) ? data.windowStart : null;
+  const normalizedWindowEnd = data.windowEnd && !isUnsetDate(data.windowEnd) ? data.windowEnd : null;
+
   const needsSeries = data.repeat !== 'NONE';
-  if (needsSeries && !data.start) {
+  if (needsSeries && !normalizedStart) {
     throw new Error('Para repetir un evento debes proporcionar fecha y hora de inicio (start).');
   }
 
   // RRULE opcional en el master (informativo)
   const rrule =
-    needsSeries && data.start
-      ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${data.start.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
+    needsSeries && normalizedStart
+      ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${normalizedStart.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
       : null;
 
-  const baseStart = data.start ?? null;
-  const series = baseStart ? buildSeries(baseStart, data.end ?? null, data.repeat) : [{ start: null as any, end: null }];
+  const baseStart = normalizedStart ?? null;
+  const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [{ start: null as any, end: null }];
 
   // Crea master = primera ocurrencia
   const master = await prisma.event.create({
@@ -520,8 +616,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       end: series[0].end ?? null,
 
       window: data.window,
-      windowStart: data.windowStart ?? null,
-      windowEnd: data.windowEnd ?? null,
+      windowStart: normalizedWindowStart,
+      windowEnd: normalizedWindowEnd,
 
       isFixed: data.isFixed ?? false,
       participatesInScheduling: data.participatesInScheduling ?? true,
@@ -558,8 +654,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
         end,
 
         window: data.window,
-        windowStart: data.windowStart ?? null,
-        windowEnd: data.windowEnd ?? null,
+        windowStart: normalizedWindowStart,
+        windowEnd: normalizedWindowEnd,
 
         isFixed: data.isFixed ?? false,
         participatesInScheduling: data.participatesInScheduling ?? true,
@@ -677,8 +773,13 @@ export async function POST(req: Request) {
 
     let items;
     if (data.kind === 'EVENTO') {
-      items = await createEventSeries(user.id, data);
-      await preemptConflictingEvents(user.id, items);
+      const created = await createEventSeries(user.id, data);
+      await scheduleFlexibleEvents(user.id, created);
+      await preemptConflictingEvents(user.id, created);
+      const ids = created.map((item) => item.id);
+      const refreshed = await prisma.event.findMany({ where: { id: { in: ids } } });
+      const byId = new Map(refreshed.map((item) => [item.id, item]));
+      items = ids.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
     } else {
       items = await createTaskSeries(user.id, data);
     }
