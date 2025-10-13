@@ -1,0 +1,154 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ==== FullCalendar – overrides globales ==== */
+.fc {
+  --fc-border-color: rgb(226 232 240);            /* slate-200 (base para mes/año) */
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: rgb(248 250 252);        /* slate-50 */
+  --fc-today-bg-color: transparent;
+  --fc-event-bg-color: rgb(241 245 249);          /* slate-100 */
+  --fc-event-border-color: rgb(226 232 240);
+  --fc-event-text-color: rgb(30 41 59);           /* slate-800 */
+  --fc-today-border: rgb(37 99 235);              /* blue-600 */
+  font-size: 14px;
+}
+
+/* Encabezados y bordes base (mes/año) */
+.fc .fc-col-header-cell-cushion {
+  padding: 0.5rem 0.25rem;
+  font-weight: 600;
+  color: rgb(71 85 105);                          /* slate-600 */
+}
+.fc .fc-scrollgrid,
+.fc .fc-scrollgrid-section > * {
+  border-radius: 0.75rem;
+}
+.fc .fc-daygrid-day {
+  border-color: rgb(241 245 249);                 /* slate-100 (mes) */
+}
+
+/* === Semana / Día – ajustes pedidos === */
+
+/* Texto del eje de horas más oscuro y legible */
+.fc .fc-timegrid-axis-cushion {
+  color: rgb(30 41 59);                           /* slate-800 */
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Líneas del grid (horizontales y verticales) ~3 tonos más oscuras */
+.fc .fc-timegrid-slot,
+.fc .fc-timegrid-axis,
+.fc .fc-timegrid-divider,
+.fc .fc-timegrid-col {
+  border-color: rgb(203 213 225) !important;      /* slate-300 */
+}
+
+/* Números de día más oscuros (mes / año) */
+.fc .fc-daygrid-day-number,
+.fc .fc-multimonth .fc-daygrid-day-number {
+  color: rgb(0, 0, 0);                           /* slate-900 */
+  font-weight: 500;
+}
+
+/* Horas del eje izquierdo (Día/Semana) más oscuras */
+.fc .fc-timegrid-axis-frame .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-axis .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion,           /* por compatibilidad */
+.fc .fc-timegrid-axis .fc-scrollgrid-shrink-cushion {  /* a veces FC agrega esta clase */
+  color: rgb(15 23 42) !important;  /* slate-900 */
+  font-weight: 500 !important;
+}
+
+/* Líneas de la grilla más oscuras (~3 tonos) */
+.fc .fc-timegrid-slot,
+.fc .fc-timegrid-axis,
+.fc .fc-timegrid-divider,
+.fc .fc-timegrid-col {
+  border-color: rgb(203 213 225) !important; /* slate-300 */
+}
+
+
+/* Resaltado de hoy más notorio */
+.fc-is-today-strong .fc-daygrid-day-frame,
+.fc .fc-timegrid-col.fc-day-today .fc-timegrid-col-frame {
+  background: rgba(37, 99, 235, 0.10);            /* blue-600 /10 */
+}
+.fc .fc-day-today {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: -2px;
+}
+
+/* Eventos tipo chip */
+.fc .fc-event {
+  border-radius: 0.5rem;
+  padding: 2px 6px;
+}
+
+/* Vista anual 4x3 compacta (estilo Google) */
+.fc .fc-multimonth {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 0.75rem;
+}
+.fc .fc-multimonth-month {
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  background: white;
+}
+.fc .fc-multimonth-title {
+  font-weight: 600;
+  color: rgb(30 41 59);
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+  text-transform: capitalize;                      /* “octubre” */
+}
+.fc .fc-multimonth .fc-col-header-cell-cushion {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.125rem;
+}
+.fc .fc-multimonth .fc-daygrid-day-frame {
+  min-height: 24px;
+}
+
+/* Modo oscuro opcional (si usas .dark en <html>) */
+.dark .fc {
+  --fc-border-color: rgb(30 41 59);               /* slate-800 */
+  --fc-neutral-bg-color: rgb(2 6 23);             /* slate-950-ish */
+  --fc-event-bg-color: rgb(30 41 59);             /* slate-800 */
+  --fc-event-text-color: rgb(226 232 240);        /* slate-200 */
+}
+.dark .fc .fc-col-header-cell-cushion { color: rgb(148 163 184); } /* slate-400 */
+.dark .fc .fc-daygrid-day { border-color: rgb(51 65 85); }         /* slate-700 */
+.dark .fc .fc-timegrid-slot,
+.dark .fc .fc-timegrid-axis,
+.dark .fc .fc-timegrid-divider,
+.dark .fc .fc-timegrid-col { border-color: rgb(71 85 105) !important; } /* slate-600 */
+.dark .fc .fc-timegrid-axis-cushion { color: rgb(203 213 225); }    /* slate-300 */
+.dark .fc .fc-daygrid-day-number { color: rgb(226 232 240); }       /* slate-200 */

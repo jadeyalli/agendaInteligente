@@ -1,0 +1,220 @@
+// =====================
+// Datasource & Generator
+// =====================
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// =====================
+// Enums
+// =====================
+enum Priority {
+  CRITICA
+  URGENTE
+  RELEVANTE
+  OPCIONAL
+}
+
+enum RepeatRule {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum AvailabilityWindow {
+  NONE
+  PRONTO
+  SEMANA
+  MES
+  RANGO
+}
+
+enum EventKind {
+  EVENTO
+  TAREA
+  SOLICITUD
+}
+
+enum ICalStatus {
+  TENTATIVE
+  CONFIRMED
+  CANCELLED
+}
+
+enum ICalTransparency {
+  OPAQUE
+  TRANSPARENT
+}
+
+enum ICalMethod {
+  PUBLISH
+  REQUEST
+  REPLY
+  CANCEL
+  ADD
+  REFRESH
+  COUNTER
+  DECLINECOUNTER
+}
+
+enum ICalTodoStatus {
+  NEEDS_ACTION
+  IN_PROCESS
+  COMPLETED
+  CANCELLED
+}
+
+// =====================
+// Modelos
+// =====================
+model User {
+  id        String             @id @default(cuid())
+  email     String             @unique
+  name      String?
+  events    Event[]
+  slots     AvailabilitySlot[]
+  calendars Calendar[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Calendar {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  name     String
+  color    String?
+  timezone String  @default("UTC")
+
+  source CalendarSource?
+  events Event[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model CalendarSource {
+  id         String   @id @default(cuid())
+  calendarId String   @unique
+  calendar   Calendar @relation(fields: [calendarId], references: [id])
+
+  kind       String
+  url        String?
+  etag       String?
+  syncToken  String?
+  lastSynced DateTime?
+  method     ICalMethod?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Event {
+  id String @id @default(cuid())
+
+  // Relaciones
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  calendarId String?
+  calendar   Calendar? @relation(fields: [calendarId], references: [id])
+
+  // Enlace maestro→instancias (para posicionamiento inteligente)
+  originEventId String?
+  originEvent   Event?  @relation("EventOrigin", fields: [originEventId], references: [id])
+  instances     Event[] @relation("EventOrigin")
+
+  // Básicos
+  kind        EventKind @default(EVENTO)
+  title       String
+  description String?
+
+  // Fecha/hora
+  start           DateTime?
+  end             DateTime?
+  tzid            String?
+  durationMinutes Int?
+
+  // Tareas (VTODO)
+  dueDate         DateTime?
+  todoStatus      ICalTodoStatus?
+  completed       Boolean         @default(false)
+  completedAt     DateTime?
+  percentComplete Int?
+
+  // Clasificación UX
+  priority Priority
+  category String?
+
+  // Comportamiento en agenda
+  isInPerson               Boolean @default(true)
+  canOverlap               Boolean @default(false)
+  isAllDay                 Boolean @default(false)
+  participatesInScheduling Boolean @default(true)
+
+  // Recurrencia (iCal)
+  repeat RepeatRule @default(NONE)
+  rrule  String?
+  rdate  Json?
+  exrule String?
+  exdate Json?
+
+  // Ventanas de disponibilidad (heurísticas)
+  window      AvailabilityWindow @default(NONE)
+  windowStart DateTime?
+  windowEnd   DateTime?
+
+  // Identidad / sync iCal
+  uid          String?
+  sequence     Int       @default(0)
+  etag         String?
+  lastModified DateTime?
+  createdIcal  DateTime?
+
+  // Localización / estado iCal (VEVENT)
+  location     String?
+  statusIcal   ICalStatus?
+  transparency ICalTransparency?
+
+  // Colaboración iCal
+  organizer String?
+  attendees Json?
+
+  // Estado interno
+  isFixed Boolean @default(false)
+  status  String  @default("SCHEDULED")
+
+  // VEVENT/VTODO original (opcional para auditoría)
+  icsRaw String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([calendarId, uid])
+  @@index([userId, start])
+  @@index([calendarId, start])
+  @@index([status])
+  @@index([participatesInScheduling])
+}
+
+model AvailabilitySlot {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  dayOfWeek Int // 0=Dom ... 6=Sáb
+  startTime String // "HH:mm"
+  endTime   String // "HH:mm"
+
+  @@index([userId, dayOfWeek])
+}
