@@ -15,6 +15,10 @@ const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
   UNI: 'URGENTE',
   INU: 'RELEVANTE',
   NN: 'OPCIONAL',
+  REMINDER: 'OPCIONAL',
+  REMINDERS: 'OPCIONAL',
+  RECORDATORIO: 'OPCIONAL',
+  RECORDATORIOS: 'OPCIONAL',
 };
 
 const PRIORITY_ORDER: Priority[] = ['CRITICA', 'URGENTE', 'RELEVANTE', 'OPCIONAL'];
@@ -749,11 +753,17 @@ function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreate
 
   if (policy.status === 'WAITLIST') {
     next.status = 'WAITLIST';
-    next.start = null;
-    next.end = null;
+
+    const startValue = next.start as Date | null | undefined;
+    const endValue = next.end as Date | null | undefined;
+
+    next.start = startValue && !isUnsetDate(startValue) ? startValue : null;
+    next.end = endValue && !isUnsetDate(endValue) ? endValue : null;
+
     next.window = 'NONE';
     next.windowStart = null;
     next.windowEnd = null;
+    next.canOverlap = true;
   } else {
     next.status = next.status ?? 'SCHEDULED';
   }
