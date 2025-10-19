@@ -256,6 +256,7 @@ function endOfYearOf(d: Date): Date {
 }
 
 type BusyInterval = { start: Date; end: Date };
+type WeightedBusyInterval = BusyInterval & { weight: number };
 
 const DEFAULT_DURATION_MINUTES = 60;
 const WORK_START_HOUR = 5;
@@ -423,6 +424,15 @@ function upsertInterval(list: BusyInterval[], interval: BusyInterval): BusyInter
   return next;
 }
 
+function upsertWeightedInterval(
+  list: WeightedBusyInterval[],
+  interval: WeightedBusyInterval
+): WeightedBusyInterval[] {
+  const next = [...list, interval];
+  next.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return next;
+}
+
 function priorityWeight(priority: Priority): number {
   const idx = PRIORITY_ORDER.indexOf(priority);
   if (idx === -1) return 0;
@@ -562,9 +572,13 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
     },
   });
 
-  let busy: BusyInterval[] = blockingEvents
+  let busy: WeightedBusyInterval[] = blockingEvents
     .filter((event) => event.start && event.end)
-    .map((event) => ({ start: event.start!, end: event.end! }));
+    .map((event) => ({
+      start: event.start!,
+      end: event.end!,
+      weight: priorityWeight(event.priority),
+    }));
 
   const sorted = [...toSchedule].sort((a, b) => {
     const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
@@ -590,7 +604,11 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
     }
 
     const durationMs = ensurePositiveDurationMs(event);
-    const nextSlot = findNextSlot(durationMs, window.start, window.end, busy);
+    const candidateWeight = priorityWeight(event.priority);
+    const effectiveBusy = busy
+      .filter((interval) => interval.weight >= candidateWeight)
+      .map(({ start, end }) => ({ start, end }));
+    const nextSlot = findNextSlot(durationMs, window.start, window.end, effectiveBusy);
 
     if (!nextSlot) {
       updates.push({
@@ -615,7 +633,11 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
         participatesInScheduling: true,
       },
     });
-    busy = upsertInterval(busy, { start: nextSlot, end: nextEnd });
+    busy = upsertWeightedInterval(busy, {
+      start: nextSlot,
+      end: nextEnd,
+      weight: candidateWeight,
+    });
   }
 
   if (updates.length) {
