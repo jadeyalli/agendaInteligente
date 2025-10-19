@@ -10,6 +10,61 @@ import {
   Event,
 } from '@prisma/client';
 
+const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
+  UI: 'CRITICA',
+  UNI: 'URGENTE',
+  INU: 'RELEVANTE',
+  NN: 'OPCIONAL',
+};
+
+const PRIORITY_ORDER: Priority[] = ['CRITICA', 'URGENTE', 'RELEVANTE', 'OPCIONAL'];
+
+function normalizePriorityInput(value: unknown): Priority | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const upper = trimmed.toUpperCase();
+  if ((Object.values(Priority) as string[]).includes(upper)) {
+    return upper as Priority;
+  }
+
+  if (upper in PRIORITY_ALIAS_MAP) {
+    return PRIORITY_ALIAS_MAP[upper];
+  }
+
+  return undefined;
+}
+
+const PrioritySchema = z
+  .union([z.nativeEnum(Priority), z.string()])
+  .transform((value, ctx) => {
+    const normalized = normalizePriorityInput(value);
+    if (!normalized) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid priority' });
+      return z.NEVER;
+    }
+    return normalized;
+  });
+
+function priorityPolicy(priority: Priority): {
+  participatesInScheduling: boolean;
+  isFixed: boolean;
+  status: 'SCHEDULED' | 'WAITLIST';
+} {
+  switch (priority) {
+    case 'CRITICA':
+      return { participatesInScheduling: true, isFixed: true, status: 'SCHEDULED' };
+    case 'URGENTE':
+    case 'RELEVANTE':
+      return { participatesInScheduling: true, isFixed: false, status: 'SCHEDULED' };
+    case 'OPCIONAL':
+    default:
+      return { participatesInScheduling: false, isFixed: false, status: 'WAITLIST' };
+  }
+}
+
+
 /** DELETE /api/events?id=... [&cascade=series] */
 export async function DELETE(req: Request) {
   try {
@@ -50,7 +105,7 @@ const PatchSchema = z.object({
   title: z.string().trim().min(1).optional(),
   description: z.string().trim().nullable().optional(),
   category: z.string().nullable().optional(),
-  priority: z.nativeEnum(Priority).optional(),
+  priority: PrioritySchema.optional(),
 
   // evento
   start: z.union([z.coerce.date(), z.null()]).optional(),
@@ -86,6 +141,26 @@ export async function PATCH(req: Request) {
     }
 
     const data = parsed.data as any;
+
+    if (data.priority) {
+      const policy = priorityPolicy(data.priority);
+      data.participatesInScheduling = policy.participatesInScheduling;
+      data.isFixed = policy.isFixed;
+
+      if (policy.status === 'WAITLIST') {
+        data.status = 'WAITLIST';
+        data.start = null;
+        data.end = null;
+        data.window = 'NONE';
+        data.windowStart = null;
+        data.windowEnd = null;
+      } else {
+        data.status = data.status ?? 'SCHEDULED';
+        if (policy.isFixed) {
+          data.canOverlap = false;
+        }
+      }
+    }
 
     // Normaliza nullables a undefined para Prisma si no se quiere tocar
     const updated = await prisma.event.update({
@@ -348,28 +423,15 @@ function upsertInterval(list: BusyInterval[], interval: BusyInterval): BusyInter
   return next;
 }
 
-function priorityWeight(p: Priority): number {
-  switch (p) {
-    case 'CRITICA':
-      return 3;
-    case 'URGENTE':
-      return 2;
-    case 'RELEVANTE':
-      return 1;
-    default:
-      return 0;
-  }
+function priorityWeight(priority: Priority): number {
+  const idx = PRIORITY_ORDER.indexOf(priority);
+  if (idx === -1) return 0;
+  return PRIORITY_ORDER.length - idx;
 }
 
 function lowerPriorityTargets(priority: Priority): Priority[] {
-  switch (priority) {
-    case 'CRITICA':
-      return ['URGENTE', 'RELEVANTE'];
-    case 'URGENTE':
-      return ['RELEVANTE'];
-    default:
-      return [];
-  }
+  const base = priorityWeight(priority);
+  return PRIORITY_ORDER.filter((candidate) => candidate !== 'OPCIONAL' && priorityWeight(candidate) < base);
 }
 
 async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
@@ -480,6 +542,7 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
       event.participatesInScheduling &&
       !event.isFixed &&
       !event.canOverlap &&
+      (event.priority === 'URGENTE' || event.priority === 'RELEVANTE') &&
       isUnsetDate(event.start)
   );
 
@@ -615,7 +678,7 @@ const EventCreateSchema_EVENTO = z.object({
 
   isInPerson: z.boolean().optional().default(true),
   canOverlap: z.boolean().optional().default(false),
-  priority: z.nativeEnum(Priority).default('RELEVANTE'),
+  priority: PrioritySchema.default('RELEVANTE'),
 
   repeat: z.nativeEnum(RepeatRule).default('NONE'),
 
@@ -643,7 +706,7 @@ const EventCreateSchema_TAREA = z.object({
   repeat: z.nativeEnum(RepeatRule).default('NONE'),
   dueDate: zDate, // requerido cuando repeat ≠ NONE
 
-  priority: z.nativeEnum(Priority).optional().default('RELEVANTE'),
+  priority: PrioritySchema.optional().default('RELEVANTE'),
   todoStatus: z.nativeEnum(ICalTodoStatus).optional().default('NEEDS_ACTION'),
   calendarId: z.string().nullish(),
 });
@@ -652,6 +715,33 @@ const EventCreateSchema = z.discriminatedUnion('kind', [
   EventCreateSchema_EVENTO,
   EventCreateSchema_TAREA,
 ]);
+
+type EventCreatePayload = z.infer<typeof EventCreateSchema_EVENTO>;
+
+function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreatePayload {
+  const policy = priorityPolicy(data.priority);
+  const next: EventCreatePayload = { ...data };
+
+  next.participatesInScheduling = policy.participatesInScheduling;
+  next.isFixed = policy.isFixed;
+
+  if (policy.status === 'WAITLIST') {
+    next.status = 'WAITLIST';
+    next.start = null;
+    next.end = null;
+    next.window = 'NONE';
+    next.windowStart = null;
+    next.windowEnd = null;
+  } else {
+    next.status = next.status ?? 'SCHEDULED';
+  }
+
+  if (policy.isFixed) {
+    next.canOverlap = false;
+  }
+
+  return next;
+}
 
 /** ============== creación series EVENTO ============== */
 async function createEventSeries(userId: string, data: z.infer<typeof EventCreateSchema_EVENTO>) {
@@ -852,7 +942,8 @@ export async function POST(req: Request) {
 
     let items;
     if (data.kind === 'EVENTO') {
-      const created = await createEventSeries(user.id, data);
+      const normalized = applyPriorityPolicyToEventCreate(data);
+      const created = await createEventSeries(user.id, normalized);
       await scheduleFlexibleEvents(user.id, created);
       await preemptLowerPriorityEvents(user.id, created);
       const ids = created.map((item) => item.id);

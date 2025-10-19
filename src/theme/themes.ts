@@ -7,10 +7,10 @@ type Neutrals = { bg: string; surface: string; text: string; muted: string };
 export const THEMES: Record<ThemeKey, { labels: Labels; labelsFg: LabelsFg; neutrals: Neutrals }> = {
   pastel: {
     labels: {
-      CRITICA: '#bfefa2',
-      URGENTE: '#f4d283',
-      RELEVANTE: '#ffb294',
-      OPCIONAL: '#ff9fc2',
+      CRITICA: '#dc2626',
+      URGENTE: '#ea580c',
+      RELEVANTE: '#2563eb',
+      OPCIONAL: '#0d9488',
     },
     labelsFg: {
       CRITICA: '#ffffff',
@@ -52,9 +52,9 @@ export const THEMES: Record<ThemeKey, { labels: Labels; labelsFg: LabelsFg; neut
   },
   autumn: {
     labels: {
-      CRITICA: '#d46419',
-      URGENTE: '#b34212',
-      RELEVANTE: '#341405',
+      CRITICA: '#b45309',
+      URGENTE: '#92400e',
+      RELEVANTE: '#78350f',
       OPCIONAL: '#166534',
     },
     labelsFg: {
@@ -63,7 +63,7 @@ export const THEMES: Record<ThemeKey, { labels: Labels; labelsFg: LabelsFg; neut
       RELEVANTE: '#fde68a',
       OPCIONAL: '#ecfdf5',
     },
-    neutrals: { bg: '#fffbeb', surface: '#fef3c7', text: '#e2e8f0', muted: '#854d0e' },
+    neutrals: { bg: '#fffbeb', surface: '#fef3c7', text: '#422006', muted: '#854d0e' },
   },
   mono: {
     labels: {

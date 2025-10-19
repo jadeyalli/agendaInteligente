@@ -100,6 +100,11 @@ function toAllDayBounds(start: Date, end: Date | null): { start: Date; end: Date
     return { start: startUtc, end: endUtc };
 }
 
+function allDayBoundsFromDate(start: Date, durationMs: number): { start: Date; end: Date } {
+    const startUtc = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+    return { start: startUtc, end: new Date(startUtc.getTime() + durationMs) };
+}
+
 async function ensureUserAndCalendar(email: string, calendarName: string) {
     const user =
         (await prisma.user.findUnique({ where: { email } })) ??
@@ -190,15 +195,16 @@ export async function importIcsFromText(
 
         if (mode === 'REMINDER' || (mode === 'SMART' && isAllDay)) {
             const { start: allDayStart, end: allDayEnd } = toAllDayBounds(start, end ?? null);
-            const reminderData = {
+            const reminderDurationMinutes = minutesDiff(allDayStart, allDayEnd);
+            const reminderDurationMs = reminderDurationMinutes * 60 * 1000;
+
+            const reminderBase = {
                 userId: user.id,
                 calendarId: calendar.id,
                 kind: 'EVENTO' as const,
                 title: summary,
                 description,
                 location,
-                start: allDayStart,
-                end: allDayEnd,
                 tzid,
                 isAllDay: true,
                 transparency: 'TRANSPARENT' as DbEvent['transparency'],
@@ -208,14 +214,89 @@ export async function importIcsFromText(
                 priority: 'RELEVANTE' as const,
                 statusIcal,
                 sequence,
-                repeat: repeat as any,
-                rrule: rrule ?? null,
                 category: 'AVISO',
                 status: 'SCHEDULED' as const,
                 window: 'NONE' as const,
                 windowStart: null,
                 windowEnd: null,
-                durationMinutes: minutesDiff(allDayStart, allDayEnd),
+                durationMinutes: reminderDurationMinutes,
+            };
+
+            const hasReminderRrule = !!rrule;
+
+            if (hasReminderRrule) {
+                if (uid) {
+                    const existing = await prisma.event.findFirst({
+                        where: {
+                            calendarId: calendar.id,
+                            uid,
+                        },
+                    });
+                    if (existing) {
+                        await prisma.event.deleteMany({
+                            where: {
+                                OR: [
+                                    { id: existing.id },
+                                    { originEventId: existing.id },
+                                ],
+                            },
+                        });
+                    }
+                }
+
+                const now = new Date();
+                const until = new Date(now);
+                until.setUTCMonth(until.getUTCMonth() + (expandMonths || 6));
+
+                const occurrences = expandOccurrences(comp, until);
+                const ordered = occurrences.length
+                    ? occurrences.sort((a, b) => a.getTime() - b.getTime())
+                    : [start];
+
+                const masterOcc = ordered[0];
+                const masterBounds = masterOcc
+                    ? allDayBoundsFromDate(masterOcc, reminderDurationMs)
+                    : { start: allDayStart, end: allDayEnd };
+
+                const masterData = {
+                    ...reminderBase,
+                    start: masterBounds.start,
+                    end: masterBounds.end,
+                    repeat: repeat as any,
+                    rrule: rrule ?? null,
+                    ...(uid ? { uid } : {}),
+                };
+
+                const master = await prisma.event.create({ data: masterData });
+                importedIds.push(master.id);
+
+                const rest = ordered.slice(1);
+                if (rest.length) {
+                    const tx = rest.map((occ) => {
+                        const bounds = allDayBoundsFromDate(occ, reminderDurationMs);
+                        return prisma.event.create({
+                            data: {
+                                ...reminderBase,
+                                originEventId: master.id,
+                                start: bounds.start,
+                                end: bounds.end,
+                                repeat: 'NONE',
+                                rrule: null,
+                            },
+                        });
+                    });
+                    const created = await prisma.$transaction(tx);
+                    created.forEach((ev) => importedIds.push(ev.id));
+                }
+                continue;
+            }
+
+            const reminderData = {
+                ...reminderBase,
+                start: allDayStart,
+                end: allDayEnd,
+                repeat: repeat as any,
+                rrule: rrule ?? null,
             };
 
             if (whereByUid) {
