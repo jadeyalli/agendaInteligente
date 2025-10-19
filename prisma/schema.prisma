@@ -40,6 +40,7 @@ enum EventKind {
   EVENTO
   TAREA
   SOLICITUD
+  RECORDATORIO
 }
 
 enum ICalStatus {
