@@ -967,11 +967,12 @@ export async function POST(req: Request) {
       const normalized = applyPriorityPolicyToEventCreate(data);
       const created = await createEventSeries(user.id, normalized);
       await scheduleFlexibleEvents(user.id, created);
-      await preemptLowerPriorityEvents(user.id, created);
-      const ids = created.map((item) => item.id);
-      const refreshed = await prisma.event.findMany({ where: { id: { in: ids } } });
+      const createdIds = created.map((item) => item.id);
+      const scheduled = await prisma.event.findMany({ where: { id: { in: createdIds } } });
+      await preemptLowerPriorityEvents(user.id, scheduled);
+      const refreshed = await prisma.event.findMany({ where: { id: { in: createdIds } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
-      items = ids.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
+      items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
     } else {
       items = await createTaskSeries(user.id, data);
     }
