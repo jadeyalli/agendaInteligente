@@ -6,7 +6,64 @@ import {
   Priority,
   RepeatRule,
   ICalTodoStatus,
+  Prisma,
+  Event,
 } from '@prisma/client';
+
+const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
+  UI: 'CRITICA',
+  UNI: 'URGENTE',
+  INU: 'RELEVANTE',
+  NN: 'OPCIONAL',
+};
+
+const PRIORITY_ORDER: Priority[] = ['CRITICA', 'URGENTE', 'RELEVANTE', 'OPCIONAL'];
+
+function normalizePriorityInput(value: unknown): Priority | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const upper = trimmed.toUpperCase();
+  if ((Object.values(Priority) as string[]).includes(upper)) {
+    return upper as Priority;
+  }
+
+  if (upper in PRIORITY_ALIAS_MAP) {
+    return PRIORITY_ALIAS_MAP[upper];
+  }
+
+  return undefined;
+}
+
+const PrioritySchema = z
+  .union([z.nativeEnum(Priority), z.string()])
+  .transform((value, ctx) => {
+    const normalized = normalizePriorityInput(value);
+    if (!normalized) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid priority' });
+      return z.NEVER;
+    }
+    return normalized;
+  });
+
+function priorityPolicy(priority: Priority): {
+  participatesInScheduling: boolean;
+  isFixed: boolean;
+  status: 'SCHEDULED' | 'WAITLIST';
+} {
+  switch (priority) {
+    case 'CRITICA':
+      return { participatesInScheduling: true, isFixed: true, status: 'SCHEDULED' };
+    case 'URGENTE':
+    case 'RELEVANTE':
+      return { participatesInScheduling: true, isFixed: false, status: 'SCHEDULED' };
+    case 'OPCIONAL':
+    default:
+      return { participatesInScheduling: false, isFixed: false, status: 'WAITLIST' };
+  }
+}
+
 
 /** DELETE /api/events?id=... [&cascade=series] */
 export async function DELETE(req: Request) {
@@ -48,7 +105,7 @@ const PatchSchema = z.object({
   title: z.string().trim().min(1).optional(),
   description: z.string().trim().nullable().optional(),
   category: z.string().nullable().optional(),
-  priority: z.nativeEnum(Priority).optional(),
+  priority: PrioritySchema.optional(),
 
   // evento
   start: z.union([z.coerce.date(), z.null()]).optional(),
@@ -84,6 +141,26 @@ export async function PATCH(req: Request) {
     }
 
     const data = parsed.data as any;
+
+    if (data.priority) {
+      const policy = priorityPolicy(data.priority);
+      data.participatesInScheduling = policy.participatesInScheduling;
+      data.isFixed = policy.isFixed;
+
+      if (policy.status === 'WAITLIST') {
+        data.status = 'WAITLIST';
+        data.start = null;
+        data.end = null;
+        data.window = 'NONE';
+        data.windowStart = null;
+        data.windowEnd = null;
+      } else {
+        data.status = data.status ?? 'SCHEDULED';
+        if (policy.isFixed) {
+          data.canOverlap = false;
+        }
+      }
+    }
 
     // Normaliza nullables a undefined para Prisma si no se quiere tocar
     const updated = await prisma.event.update({
@@ -178,6 +255,374 @@ function endOfYearOf(d: Date): Date {
   return new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999);
 }
 
+type BusyInterval = { start: Date; end: Date };
+
+const DEFAULT_DURATION_MINUTES = 60;
+const WORK_START_HOUR = 5;
+const WORK_END_HOUR = 23;
+
+function ensurePositiveDurationMs(event: Event): number {
+  if (event.start && event.end) {
+    const diff = event.end.getTime() - event.start.getTime();
+    if (diff > 0) return diff;
+  }
+  const minutes = event.durationMinutes && event.durationMinutes > 0 ? event.durationMinutes : DEFAULT_DURATION_MINUTES;
+  return minutes * 60 * 1000;
+}
+
+function isUnsetDate(value: Date | null | undefined): boolean {
+  return !value || value.getTime() === 0;
+}
+
+function startOfWorkingDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), WORK_START_HOUR, 0, 0, 0);
+}
+
+function endOfWorkingDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), WORK_END_HOUR, 0, 0, 0);
+}
+
+function earliestSchedulingStart(): Date {
+  const now = new Date();
+  const todayStart = startOfWorkingDay(now);
+  return now.getTime() > todayStart.getTime() ? now : todayStart;
+}
+
+function moveToNextWorkingDay(date: Date): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + 1);
+  next.setHours(WORK_START_HOUR, 0, 0, 0);
+  const earliest = earliestSchedulingStart();
+  return next.getTime() < earliest.getTime() ? earliest : next;
+}
+
+function clampToWorkingHours(date: Date): Date {
+  const earliest = earliestSchedulingStart();
+  let candidate = new Date(Math.max(date.getTime(), earliest.getTime()));
+
+  while (true) {
+    const dayStart = startOfWorkingDay(candidate);
+    const dayEnd = endOfWorkingDay(candidate);
+
+    if (candidate.getTime() < dayStart.getTime()) {
+      candidate = dayStart;
+      continue;
+    }
+
+    if (candidate.getTime() >= dayEnd.getTime()) {
+      candidate = moveToNextWorkingDay(candidate);
+      continue;
+    }
+
+    return candidate;
+  }
+}
+
+function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | null {
+  const now = new Date();
+  const candidates: Date[] = [];
+  if (event.start) candidates.push(event.start);
+  if (event.windowStart) candidates.push(event.windowStart);
+  candidates.push(now);
+  let start = candidates.reduce((max, current) => (current.getTime() > max.getTime() ? current : max));
+
+  let end: Date | null = event.windowEnd ?? null;
+
+  switch (event.window) {
+    case 'PRONTO': {
+      const prontoEnd = new Date(start.getTime() + 48 * 60 * 60 * 1000);
+      end = end ? new Date(Math.min(end.getTime(), prontoEnd.getTime())) : prontoEnd;
+      break;
+    }
+    case 'SEMANA': {
+      const weekEnd = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+      end = end ? new Date(Math.min(end.getTime(), weekEnd.getTime())) : weekEnd;
+      break;
+    }
+    case 'MES': {
+      const monthEnd = addMonthsSafe(start, 1);
+      end = end ? new Date(Math.min(end.getTime(), monthEnd.getTime())) : monthEnd;
+      break;
+    }
+    case 'RANGO': {
+      if (event.windowStart && event.windowStart.getTime() > start.getTime()) {
+        start = event.windowStart;
+      }
+      if (event.windowEnd && (!end || event.windowEnd.getTime() < end.getTime())) {
+        end = event.windowEnd;
+      }
+      break;
+    }
+    default: {
+      if (event.windowStart && event.windowStart.getTime() > start.getTime()) {
+        start = event.windowStart;
+      }
+      if (event.windowEnd && (!end || event.windowEnd.getTime() < end.getTime())) {
+        end = event.windowEnd;
+      }
+      break;
+    }
+  }
+
+  const clampedStart = clampToWorkingHours(start);
+
+  if (end && end.getTime() <= clampedStart.getTime()) {
+    return null;
+  }
+
+  return { start: clampedStart, end };
+}
+
+function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: BusyInterval[]): Date | null {
+  const sorted = [...busy].sort((a, b) => a.start.getTime() - b.start.getTime());
+  let cursor = clampToWorkingHours(start);
+  const limit = end ? end.getTime() : Number.POSITIVE_INFINITY;
+
+  if (cursor.getTime() >= limit) {
+    return null;
+  }
+
+  while (cursor.getTime() + durationMs <= limit) {
+    const dayEnd = endOfWorkingDay(cursor);
+
+    if (cursor.getTime() + durationMs > dayEnd.getTime()) {
+      cursor = moveToNextWorkingDay(cursor);
+      if (cursor.getTime() >= limit) {
+        return null;
+      }
+      continue;
+    }
+
+    let conflict: BusyInterval | null = null;
+    for (const interval of sorted) {
+      if (interval.end.getTime() <= cursor.getTime()) {
+        continue;
+      }
+
+      if (interval.start.getTime() >= cursor.getTime() + durationMs) {
+        break;
+      }
+
+      conflict = interval;
+      break;
+    }
+
+    if (!conflict) {
+      return cursor;
+    }
+
+    cursor = clampToWorkingHours(new Date(Math.max(conflict.end.getTime(), cursor.getTime())));
+  }
+
+  return null;
+}
+
+function upsertInterval(list: BusyInterval[], interval: BusyInterval): BusyInterval[] {
+  const next = [...list, interval];
+  next.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return next;
+}
+
+function priorityWeight(priority: Priority): number {
+  const idx = PRIORITY_ORDER.indexOf(priority);
+  if (idx === -1) return 0;
+  return PRIORITY_ORDER.length - idx;
+}
+
+function lowerPriorityTargets(priority: Priority): Priority[] {
+  const base = priorityWeight(priority);
+  return PRIORITY_ORDER.filter((candidate) => candidate !== 'OPCIONAL' && priorityWeight(candidate) < base);
+}
+
+async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
+  for (const current of newEvents) {
+    if (current.kind !== 'EVENTO' || !current.start || !current.end) continue;
+
+    const prioritiesToMove = lowerPriorityTargets(current.priority);
+    if (!prioritiesToMove.length) continue;
+
+    const overlapping = await prisma.event.findMany({
+      where: {
+        userId,
+        id: { not: current.id },
+        kind: 'EVENTO',
+        participatesInScheduling: true,
+        isFixed: false,
+        canOverlap: false,
+        priority: { in: prioritiesToMove },
+        start: { lt: current.end },
+        end: { gt: current.start },
+      },
+    });
+
+    if (!overlapping.length) continue;
+
+    const toMoveIds = new Set(overlapping.map((event) => event.id));
+
+    const blockingEvents = await prisma.event.findMany({
+      where: {
+        userId,
+        kind: 'EVENTO',
+        participatesInScheduling: true,
+        start: { not: null },
+        end: { not: null },
+        OR: [{ isFixed: true }, { canOverlap: false }],
+      },
+    });
+
+    let busy: BusyInterval[] = blockingEvents
+      .filter((event) => !toMoveIds.has(event.id) && event.start && event.end)
+      .map((event) => ({ start: event.start!, end: event.end! }));
+
+    const sortedOverlaps = [...overlapping].sort((a, b) => {
+      const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
+      if (diff !== 0) return diff;
+      if (a.start && b.start) return a.start.getTime() - b.start.getTime();
+      if (a.start) return -1;
+      if (b.start) return 1;
+      return 0;
+    });
+
+    const updates: { id: string; data: Prisma.EventUpdateInput }[] = [];
+
+    for (const event of sortedOverlaps) {
+      const window = schedulingWindowOf(event);
+      if (!window) {
+        updates.push({
+          id: event.id,
+          data: {
+            start: null,
+            end: null,
+            status: 'WAITLIST',
+            participatesInScheduling: false,
+          },
+        });
+        continue;
+      }
+
+      const durationMs = ensurePositiveDurationMs(event);
+      const nextSlot = findNextSlot(durationMs, window.start, window.end, busy);
+
+      if (!nextSlot) {
+        updates.push({
+          id: event.id,
+          data: {
+            start: null,
+            end: null,
+            status: 'WAITLIST',
+            participatesInScheduling: false,
+          },
+        });
+        continue;
+      }
+
+      const nextEnd = new Date(nextSlot.getTime() + durationMs);
+      updates.push({
+        id: event.id,
+        data: {
+          start: nextSlot,
+          end: nextEnd,
+          status: 'SCHEDULED',
+          participatesInScheduling: true,
+        },
+      });
+      busy = upsertInterval(busy, { start: nextSlot, end: nextEnd });
+    }
+
+    if (updates.length) {
+      await prisma.$transaction(updates.map((update) => prisma.event.update({ where: { id: update.id }, data: update.data })));
+    }
+  }
+}
+
+async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
+  const toSchedule = candidates.filter(
+    (event) =>
+      event.kind === 'EVENTO' &&
+      event.participatesInScheduling &&
+      !event.isFixed &&
+      !event.canOverlap &&
+      (event.priority === 'URGENTE' || event.priority === 'RELEVANTE') &&
+      isUnsetDate(event.start)
+  );
+
+  if (!toSchedule.length) return;
+
+  const candidateIds = new Set(toSchedule.map((event) => event.id));
+
+  const blockingEvents = await prisma.event.findMany({
+    where: {
+      userId,
+      kind: 'EVENTO',
+      participatesInScheduling: true,
+      start: { not: null },
+      end: { not: null },
+      OR: [{ isFixed: true }, { canOverlap: false }],
+      NOT: { id: { in: Array.from(candidateIds) } },
+    },
+  });
+
+  let busy: BusyInterval[] = blockingEvents
+    .filter((event) => event.start && event.end)
+    .map((event) => ({ start: event.start!, end: event.end! }));
+
+  const sorted = [...toSchedule].sort((a, b) => {
+    const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
+    if (diff !== 0) return diff;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+
+  const updates: { id: string; data: Prisma.EventUpdateInput }[] = [];
+
+  for (const event of sorted) {
+    const window = schedulingWindowOf(event);
+    if (!window) {
+      updates.push({
+        id: event.id,
+        data: {
+          start: null,
+          end: null,
+          status: 'WAITLIST',
+          participatesInScheduling: false,
+        },
+      });
+      continue;
+    }
+
+    const durationMs = ensurePositiveDurationMs(event);
+    const nextSlot = findNextSlot(durationMs, window.start, window.end, busy);
+
+    if (!nextSlot) {
+      updates.push({
+        id: event.id,
+        data: {
+          start: null,
+          end: null,
+          status: 'WAITLIST',
+          participatesInScheduling: false,
+        },
+      });
+      continue;
+    }
+
+    const nextEnd = new Date(nextSlot.getTime() + durationMs);
+    updates.push({
+      id: event.id,
+      data: {
+        start: nextSlot,
+        end: nextEnd,
+        status: 'SCHEDULED',
+        participatesInScheduling: true,
+      },
+    });
+    busy = upsertInterval(busy, { start: nextSlot, end: nextEnd });
+  }
+
+  if (updates.length) {
+    await prisma.$transaction(updates.map((update) => prisma.event.update({ where: { id: update.id }, data: update.data })));
+  }
+}
+
 /** Genera todas las ocurrencias según regla y límites:
  * - DAILY/WEEKLY/MONTHLY: hasta el 31 de diciembre del año base
  * - YEARLY: hasta año base + 2 (inclusive)
@@ -231,9 +676,9 @@ const EventCreateSchema_EVENTO = z.object({
   description: z.string().trim().nullish(),
   category: z.string().nullish(),
 
-  isInPerson: z.boolean(),
+  isInPerson: z.boolean().optional().default(true),
   canOverlap: z.boolean().optional().default(false),
-  priority: z.nativeEnum(Priority).default('RELEVANTE'),
+  priority: PrioritySchema.default('RELEVANTE'),
 
   repeat: z.nativeEnum(RepeatRule).default('NONE'),
 
@@ -261,7 +706,7 @@ const EventCreateSchema_TAREA = z.object({
   repeat: z.nativeEnum(RepeatRule).default('NONE'),
   dueDate: zDate, // requerido cuando repeat ≠ NONE
 
-  priority: z.nativeEnum(Priority).optional().default('RELEVANTE'),
+  priority: PrioritySchema.optional().default('RELEVANTE'),
   todoStatus: z.nativeEnum(ICalTodoStatus).optional().default('NEEDS_ACTION'),
   calendarId: z.string().nullish(),
 });
@@ -271,21 +716,53 @@ const EventCreateSchema = z.discriminatedUnion('kind', [
   EventCreateSchema_TAREA,
 ]);
 
+type EventCreatePayload = z.infer<typeof EventCreateSchema_EVENTO>;
+
+function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreatePayload {
+  const policy = priorityPolicy(data.priority);
+  const next: EventCreatePayload = { ...data };
+
+  next.participatesInScheduling = policy.participatesInScheduling;
+  next.isFixed = policy.isFixed;
+
+  if (policy.status === 'WAITLIST') {
+    next.status = 'WAITLIST';
+    next.start = null;
+    next.end = null;
+    next.window = 'NONE';
+    next.windowStart = null;
+    next.windowEnd = null;
+  } else {
+    next.status = next.status ?? 'SCHEDULED';
+  }
+
+  if (policy.isFixed) {
+    next.canOverlap = false;
+  }
+
+  return next;
+}
+
 /** ============== creación series EVENTO ============== */
 async function createEventSeries(userId: string, data: z.infer<typeof EventCreateSchema_EVENTO>) {
+  const normalizedStart = data.start && !isUnsetDate(data.start) ? data.start : null;
+  const normalizedEnd = data.end && !isUnsetDate(data.end) ? data.end : null;
+  const normalizedWindowStart = data.windowStart && !isUnsetDate(data.windowStart) ? data.windowStart : null;
+  const normalizedWindowEnd = data.windowEnd && !isUnsetDate(data.windowEnd) ? data.windowEnd : null;
+
   const needsSeries = data.repeat !== 'NONE';
-  if (needsSeries && !data.start) {
+  if (needsSeries && !normalizedStart) {
     throw new Error('Para repetir un evento debes proporcionar fecha y hora de inicio (start).');
   }
 
   // RRULE opcional en el master (informativo)
   const rrule =
-    needsSeries && data.start
-      ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${data.start.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
+    needsSeries && normalizedStart
+      ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${normalizedStart.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
       : null;
 
-  const baseStart = data.start ?? null;
-  const series = baseStart ? buildSeries(baseStart, data.end ?? null, data.repeat) : [{ start: null as any, end: null }];
+  const baseStart = normalizedStart ?? null;
+  const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [{ start: null as any, end: null }];
 
   // Crea master = primera ocurrencia
   const master = await prisma.event.create({
@@ -308,8 +785,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       end: series[0].end ?? null,
 
       window: data.window,
-      windowStart: data.windowStart ?? null,
-      windowEnd: data.windowEnd ?? null,
+      windowStart: normalizedWindowStart,
+      windowEnd: normalizedWindowEnd,
 
       isFixed: data.isFixed ?? false,
       participatesInScheduling: data.participatesInScheduling ?? true,
@@ -346,8 +823,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
         end,
 
         window: data.window,
-        windowStart: data.windowStart ?? null,
-        windowEnd: data.windowEnd ?? null,
+        windowStart: normalizedWindowStart,
+        windowEnd: normalizedWindowEnd,
 
         isFixed: data.isFixed ?? false,
         participatesInScheduling: data.participatesInScheduling ?? true,
@@ -465,7 +942,14 @@ export async function POST(req: Request) {
 
     let items;
     if (data.kind === 'EVENTO') {
-      items = await createEventSeries(user.id, data);
+      const normalized = applyPriorityPolicyToEventCreate(data);
+      const created = await createEventSeries(user.id, normalized);
+      await scheduleFlexibleEvents(user.id, created);
+      await preemptLowerPriorityEvents(user.id, created);
+      const ids = created.map((item) => item.id);
+      const refreshed = await prisma.event.findMany({ where: { id: { in: ids } } });
+      const byId = new Map(refreshed.map((item) => [item.id, item]));
+      items = ids.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
     } else {
       items = await createTaskSeries(user.id, data);
     }
