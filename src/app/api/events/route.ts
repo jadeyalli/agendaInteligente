@@ -40,6 +40,64 @@ function normalizePriorityInput(value: unknown): Priority | undefined {
   return undefined;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function coerceBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return undefined;
+}
+
+function sanitizeEventPayload(
+  raw: unknown,
+  options: { treatMissingPriorityAsOptionalHint?: boolean } = {}
+): unknown {
+  if (!isPlainObject(raw)) return raw;
+
+  const clone: Record<string, unknown> = { ...raw };
+
+  const booleanKeys = ['isInPerson', 'canOverlap', 'participatesInScheduling', 'isFixed'] as const;
+  for (const key of booleanKeys) {
+    if (key in clone) {
+      const coerced = coerceBoolean(clone[key]);
+      if (coerced !== undefined) {
+        clone[key] = coerced;
+      }
+    }
+  }
+
+  const participates =
+    typeof clone.participatesInScheduling === 'boolean'
+      ? (clone.participatesInScheduling as boolean)
+      : undefined;
+
+  const statusUpper =
+    typeof clone.status === 'string' ? (clone.status as string).trim().toUpperCase() : undefined;
+
+  const optionalHint = participates === false || statusUpper === 'WAITLIST';
+
+  if ('priority' in clone) {
+    const value = clone.priority;
+    if (
+      value == null ||
+      (typeof value === 'string' && !value.trim()) ||
+      typeof value !== 'string'
+    ) {
+      clone.priority = optionalHint ? 'OPCIONAL' : 'RELEVANTE';
+    }
+  } else if (options.treatMissingPriorityAsOptionalHint && optionalHint) {
+    clone.priority = 'OPCIONAL';
+  }
+
+  return clone;
+}
+
 const PrioritySchema = z
   .union([z.nativeEnum(Priority), z.string()])
   .transform((value, ctx) => {
@@ -139,7 +197,8 @@ export async function PATCH(req: Request) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const raw = await req.json().catch(() => ({}));
-    const parsed = PatchSchema.safeParse(raw);
+    const sanitized = sanitizeEventPayload(raw);
+    const parsed = PatchSchema.safeParse(sanitized);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid payload', issues: parsed.error.flatten() }, { status: 400 });
     }
@@ -964,7 +1023,8 @@ async function createTaskSeries(userId: string, data: z.infer<typeof EventCreate
 export async function POST(req: Request) {
   try {
     const raw = await req.json();
-    const parsed = EventCreateSchema.safeParse(raw);
+    const sanitized = sanitizeEventPayload(raw, { treatMissingPriorityAsOptionalHint: true });
+    const parsed = EventCreateSchema.safeParse(sanitized);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid payload', issues: parsed.error.flatten() }, { status: 400 });
     }
