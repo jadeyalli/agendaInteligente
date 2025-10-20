@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { buildUTCDateFromStrings } from '@/lib/timezone';
 import {
   AvailabilityWindow,
   Priority,
@@ -33,6 +34,7 @@ const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
 };
 
 const PRIORITY_ORDER: Priority[] = ['CRITICA', 'URGENTE', 'RELEVANTE', 'OPCIONAL'];
+const RESCHEDULABLE_PRIORITIES: Priority[] = ['CRITICA', 'URGENTE', 'RELEVANTE'];
 
 function normalizePriorityInput(value: unknown): Priority | undefined {
   if (typeof value !== 'string') return undefined;
@@ -72,6 +74,37 @@ function sanitizeEventPayload(
   if (!isPlainObject(raw)) return raw;
 
   const clone: Record<string, unknown> = { ...raw };
+
+  const assignFromDateFragments = (
+    target: 'start' | 'end' | 'windowStart' | 'windowEnd' | 'dueDate',
+    fallbackTime?: string
+  ) => {
+    const dateKey = `${target}Date`;
+    const timeKey = `${target}Time`;
+
+    if (!clone.hasOwnProperty(dateKey) && !clone.hasOwnProperty(timeKey)) {
+      return;
+    }
+
+    const dateValue = clone[dateKey] as string | Date | null | undefined;
+    const timeValue = clone[timeKey] as string | number | null | undefined;
+
+    const parsed = buildUTCDateFromStrings(dateValue ?? null, timeValue ?? null, { fallbackTime });
+    if (parsed) {
+      clone[target] = parsed;
+    } else if (dateValue != null) {
+      clone[target] = null;
+    }
+
+    delete clone[dateKey];
+    delete clone[timeKey];
+  };
+
+  assignFromDateFragments('start');
+  assignFromDateFragments('end');
+  assignFromDateFragments('windowStart', '00:00');
+  assignFromDateFragments('windowEnd', '23:59');
+  assignFromDateFragments('dueDate');
 
   const booleanKeys = ['isInPerson', 'canOverlap', 'participatesInScheduling', 'isFixed'] as const;
   for (const key of booleanKeys) {
@@ -278,6 +311,19 @@ export async function PATCH(req: Request) {
         windowEnd: data.hasOwnProperty('windowEnd') ? data.windowEnd : undefined,
       },
     });
+
+    const shouldResolve =
+      updated.kind === 'EVENTO' &&
+      !updated.canOverlap &&
+      RESCHEDULABLE_PRIORITIES.includes(updated.priority);
+
+    if (shouldResolve) {
+      await resolveSchedulingConflicts(updated.userId);
+      const refreshed = await prisma.event.findUnique({ where: { id: updated.id } });
+      if (refreshed) {
+        return NextResponse.json(refreshed);
+      }
+    }
 
     return NextResponse.json(updated);
   } catch (e) {
@@ -800,6 +846,114 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
   }
 }
 
+async function resolveSchedulingConflicts(userId: string) {
+  const candidates = await prisma.event.findMany({
+    where: {
+      userId,
+      kind: 'EVENTO',
+      priority: { in: RESCHEDULABLE_PRIORITIES },
+      canOverlap: false,
+    },
+    orderBy: [{ createdAt: 'asc' }],
+  });
+
+  if (!candidates.length) return;
+
+  const updates: { id: string; data: Prisma.EventUpdateInput }[] = [];
+  let busy: WeightedBusyInterval[] = [];
+
+  const sorted = [...candidates].sort((a, b) => {
+    const weightDiff = priorityWeight(b.priority) - priorityWeight(a.priority);
+    if (weightDiff !== 0) return weightDiff;
+
+    const fixedDiff = Number(b.isFixed) - Number(a.isFixed);
+    if (fixedDiff !== 0) return fixedDiff;
+
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+
+  for (const event of sorted) {
+    const weight = Math.max(1, priorityWeight(event.priority));
+
+    if (event.isFixed || event.priority === 'CRITICA') {
+      if (event.start && event.end) {
+        busy = upsertWeightedInterval(busy, { start: event.start, end: event.end, weight });
+
+        const normalization: Prisma.EventUpdateInput = {};
+        if (event.participatesInScheduling !== true) normalization.participatesInScheduling = true;
+        if (event.status !== 'SCHEDULED') normalization.status = 'SCHEDULED';
+
+        if (Object.keys(normalization).length) {
+          updates.push({ id: event.id, data: normalization });
+        }
+      } else {
+        updates.push({
+          id: event.id,
+          data: {
+            start: null,
+            end: null,
+            status: 'WAITLIST',
+            participatesInScheduling: false,
+          },
+        });
+      }
+      continue;
+    }
+
+    const window = schedulingWindowOf(event);
+    if (!window) {
+      updates.push({
+        id: event.id,
+        data: {
+          start: null,
+          end: null,
+          status: 'WAITLIST',
+          participatesInScheduling: false,
+        },
+      });
+      continue;
+    }
+
+    const durationMs = ensurePositiveDurationMs(event);
+    const effectiveBusy = busy
+      .filter((interval) => interval.weight >= weight)
+      .map(({ start, end }) => ({ start, end }));
+    const nextSlot = findNextSlot(durationMs, window.start, window.end, effectiveBusy);
+
+    if (!nextSlot) {
+      updates.push({
+        id: event.id,
+        data: {
+          start: null,
+          end: null,
+          status: 'WAITLIST',
+          participatesInScheduling: false,
+        },
+      });
+      continue;
+    }
+
+    const nextEnd = new Date(nextSlot.getTime() + durationMs);
+    updates.push({
+      id: event.id,
+      data: {
+        start: nextSlot,
+        end: nextEnd,
+        status: 'SCHEDULED',
+        participatesInScheduling: true,
+      },
+    });
+
+    busy = upsertWeightedInterval(busy, { start: nextSlot, end: nextEnd, weight });
+  }
+
+  if (updates.length) {
+    await prisma.$transaction(
+      updates.map((update) => prisma.event.update({ where: { id: update.id }, data: update.data }))
+    );
+  }
+}
+
 /** Genera todas las ocurrencias según regla y límites:
  * - DAILY/WEEKLY/MONTHLY: hasta el 31 de diciembre del año base
  * - YEARLY: hasta año base + 2 (inclusive)
@@ -1227,10 +1381,8 @@ export async function POST(req: Request) {
     if (data.kind === 'EVENTO') {
       const normalized = applyPriorityPolicyToEventCreate(data);
       const created = await createEventSeries(user.id, normalized);
-      await scheduleFlexibleEvents(user.id, created);
       const createdIds = created.map((item) => item.id);
-      const scheduled = await prisma.event.findMany({ where: { id: { in: createdIds } } });
-      await preemptLowerPriorityEvents(user.id, scheduled);
+      await resolveSchedulingConflicts(user.id);
       const refreshed = await prisma.event.findMany({ where: { id: { in: createdIds } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));

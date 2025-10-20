@@ -17,6 +17,153 @@ export function toUTCDate(date: Date | null | undefined): Date | null {
   return d;
 }
 
+type ParsedTime = { hours: number; minutes: number };
+
+function isValidTime({ hours, minutes }: ParsedTime): boolean {
+  return Number.isInteger(hours) && Number.isInteger(minutes) && hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60;
+}
+
+function buildParsedTime(hours: number, minutes: number): ParsedTime | null {
+  const normalized = { hours, minutes };
+  return isValidTime(normalized) ? normalized : null;
+}
+
+function parseAmPmToken(token: string): 'AM' | 'PM' | null {
+  const normalized = token.replace(/\./g, '').toUpperCase();
+  if (normalized === 'AM') return 'AM';
+  if (normalized === 'PM') return 'PM';
+  return null;
+}
+
+export function parseTimeLike(value: string | number | null | undefined): ParsedTime | null {
+  if (value == null) return null;
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const hours = Math.trunc(value);
+    const minutes = Math.round((value - hours) * 60);
+    return buildParsedTime(hours, minutes);
+  }
+
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.replace(/\s+/g, ' ').toLowerCase();
+
+  const ampmMatch = normalized.match(/^([0-9]{1,2})(?:[:h\.]?([0-9]{1,2}))?\s*(a\.?m\.?|p\.?m\.?)$/);
+  if (ampmMatch) {
+    const hoursRaw = Number(ampmMatch[1]);
+    const minutesRaw = ampmMatch[2] != null ? Number(ampmMatch[2]) : 0;
+    if (!Number.isFinite(hoursRaw) || !Number.isFinite(minutesRaw)) return null;
+
+    const meridian = parseAmPmToken(ampmMatch[3]);
+    if (!meridian) return null;
+
+    let hours = hoursRaw % 12;
+    if (meridian === 'PM') hours = (hours + 12) % 24;
+    return buildParsedTime(hours, minutesRaw);
+  }
+
+  const digitsOnly = normalized.match(/^([0-9]{1,2})([0-9]{2})$/);
+  if (digitsOnly) {
+    const hours = Number(digitsOnly[1]);
+    const minutes = Number(digitsOnly[2]);
+    return buildParsedTime(hours, minutes);
+  }
+
+  const generic = normalized.match(/^([0-9]{1,2})(?:[:h\.\s]?([0-9]{1,2}))?$/);
+  if (generic) {
+    const hours = Number(generic[1]);
+    const minutes = generic[2] != null ? Number(generic[2]) : 0;
+    return buildParsedTime(hours, minutes);
+  }
+
+  return null;
+}
+
+type ParsedDate = { year: number; month: number; day: number };
+
+function isValidDateParts({ year, month, day }: ParsedDate): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  return candidate.getUTCFullYear() === year && candidate.getUTCMonth() === month - 1 && candidate.getUTCDate() === day;
+}
+
+export function parseDateLike(value: string | Date | null | undefined): ParsedDate | null {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return null;
+    return {
+      year: value.getUTCFullYear(),
+      month: value.getUTCMonth() + 1,
+      day: value.getUTCDate(),
+    };
+  }
+
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const parts = trimmed.split(/[^0-9]+/).filter(Boolean);
+  if (parts.length !== 3) return null;
+
+  const [a, b, c] = parts.map((segment) => Number(segment));
+  if (parts[0].length === 4) {
+    const parsed = { year: a, month: b, day: c };
+    return isValidDateParts(parsed) ? parsed : null;
+  }
+
+  if (parts[2].length === 4) {
+    let day = a;
+    let month = b;
+    const year = c;
+
+    if (a <= 12 && b > 12) {
+      month = a;
+      day = b;
+    } else if (a > 12 && b <= 12) {
+      day = a;
+      month = b;
+    }
+
+    const parsed = { year, month, day };
+    return isValidDateParts(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+type BuildDateOptions = { fallbackTime?: string | number | null };
+
+export function buildUTCDateFromStrings(
+  dateValue: string | Date | null | undefined,
+  timeValue?: string | number | null,
+  options: BuildDateOptions = {}
+): Date | null {
+  const dateParts = parseDateLike(dateValue);
+  if (!dateParts) return null;
+
+  let timeParts = parseTimeLike(timeValue ?? null);
+  if (!timeParts && options.fallbackTime != null) {
+    timeParts = parseTimeLike(options.fallbackTime);
+  }
+
+  if (!timeParts) {
+    timeParts = { hours: 0, minutes: 0 };
+  }
+
+  const { year, month, day } = dateParts;
+  const { hours, minutes } = timeParts;
+
+  const result = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0, 0));
+  return isNaN(result.getTime()) ? null : result;
+}
+
 /**
  * Convierte Date a string ISO para enviar al servidor
  */
