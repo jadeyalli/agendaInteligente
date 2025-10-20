@@ -1,231 +1,154 @@
-// ========================================
-// ARCHIVO: src/lib/timezone.ts
-// Utilidades centralizadas para manejar zonas horarias
-// ========================================
+const DEFAULT_FALLBACK_TIMEZONE = 'UTC';
 
-/**
- * Convierte un Date a ISO string en UTC
- * SIEMPRE guardar en UTC en la BD
- */
-
-
-export function toUTCDate(date: Date | null | undefined): Date | null {
-  if (!date) return null;
-  // Asegurar que es un Date válido
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return null;
-  return d;
+function isValidDateInput(value?: string | null): value is string {
+  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-/**
- * Convierte Date a string ISO para enviar al servidor
- */
-export function dateToISO(date: Date | null | undefined): string | null {
-  if (!date) return null;
-  const d = toUTCDate(date);
-  return d ? d.toISOString() : null;
+function isValidTimeInput(value?: string | null): value is string {
+  return !!value && /^\d{2}:\d{2}$/.test(value.trim());
 }
 
-/**
- * Convierte string ISO del servidor a Date
- */
-export function isoToDate(isoString: string | null | undefined): Date | null {
-  if (!isoString) return null;
+function normalizeTimezone(timeZone?: string | null): string {
+  const trimmed = typeof timeZone === 'string' ? timeZone.trim() : '';
+  if (!trimmed) return DEFAULT_FALLBACK_TIMEZONE;
   try {
-    const d = new Date(isoString);
-    return isNaN(d.getTime()) ? null : d;
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed }).format(new Date(0));
+    return trimmed;
   } catch {
-    return null;
+    return DEFAULT_FALLBACK_TIMEZONE;
   }
 }
 
-/**
- * Convierte Date a string HH:mm para inputs type="time"
- * Usa UTC para consistencia
- */
-export function dateToTimeString(date: Date | null | undefined): string {
-  if (!date) return '';
-  const d = toUTCDate(date);
-  if (!d) return '';
-  const hours = String(d.getUTCHours()).padStart(2, '0');
-  const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
-}
-
-/**
- * Convierte Date a string YYYY-MM-DD para inputs type="date"
- * Usa UTC para consistencia
- */
-export function dateToDateString(date: Date | null | undefined): string {
-  if (!date) return '';
-  const d = toUTCDate(date);
-  if (!d) return '';
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * Crea un Date a partir de strings de date + time inputs (en UTC)
- */
-export function dateAndTimeToDate(
-  dateStr: string | undefined,
-  timeStr: string | undefined
-): Date | null {
-  if (!dateStr) return null;
-
-  const [year, month, day] = dateStr.split('-');
-  const [hours = '00', minutes = '00'] = (timeStr || '').split(':');
-
+function getTimezoneOffset(date: Date, timeZone: string): number {
   try {
-    return new Date(
-      Date.UTC(
-        parseInt(year),
-        parseInt(month) - 1,
-        parseInt(day),
-        parseInt(hours),
-        parseInt(minutes),
-        0,
-        0
-      )
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    const parts = dtf.formatToParts(date);
+    const data = {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+      hour: date.getUTCHours(),
+      minute: date.getUTCMinutes(),
+      second: date.getUTCSeconds(),
+    } as Record<string, number>;
+
+    for (const part of parts) {
+      if (part.type === 'literal') continue;
+      const num = Number(part.value);
+      if (Number.isFinite(num)) {
+        data[part.type] = num;
+      }
+    }
+
+    const asUTC = Date.UTC(
+      data.year,
+      (data.month ?? 1) - 1,
+      data.day ?? 1,
+      data.hour ?? 0,
+      data.minute ?? 0,
+      data.second ?? 0,
     );
+    return asUTC - date.getTime();
   } catch {
-    return null;
+    return 0;
   }
 }
 
-
-/**
- * Obtiene la zona horaria del navegador
- */
-export function getBrowserTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+export function resolveBrowserTimezone(): string {
+  try {
+    if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat === 'undefined') {
+      return DEFAULT_FALLBACK_TIMEZONE;
+    }
+    const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return normalizeTimezone(resolved);
+  } catch {
+    return DEFAULT_FALLBACK_TIMEZONE;
+  }
 }
 
-/**
- * Obtiene el offset UTC en milisegundos
- * Ejemplo: si estás en GMT-6, devuelve -6 horas en ms
- */
-export function getUTCOffset(): number {
-  const now = new Date();
-  return now.getTimezoneOffset() * 60 * 1000;
-}
-
-/**
- * ✅ NUEVO: Convierte una hora UTC a hora LOCAL del navegador
- * Esto es lo que necesitabas
- */
-export function utcToLocal(utcDate: Date | null | undefined): Date | null {
-  if (!utcDate) return null;
-
-  const d = new Date(utcDate);
-  if (isNaN(d.getTime())) return null;
-
-  // El Date de JavaScript guarda la hora UTC internamente
-  // Pero cuando haces getHours(), getMinutes() obtiene hora LOCAL
-  // Así que NO necesitamos transformar, solo mostrar con getHours()
-  return d;
-}
-
-/**
- * ✅ NUEVO: Convierte Date a string HH:mm para inputs type="time"
- * MOSTRANDO LA HORA LOCAL (no UTC)
- */
-export function dateToTimeStringLocal(date: Date | null | undefined): string {
-  if (!date) return '';
-
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return '';
-
-  // ✅ CAMBIO: Usar getHours() en lugar de getUTCHours()
-  // getHours() devuelve la hora LOCAL del navegador
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-
-  return `${hours}:${minutes}`;
-}
-
-/**
- * ✅ NUEVO: Convierte Date a string YYYY-MM-DD para inputs type="date"
- * MOSTRANDO LA FECHA LOCAL (no UTC)
- */
-export function dateToDateStringLocal(date: Date | null | undefined): string {
-  if (!date) return '';
-
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return '';
-
-  // ✅ CAMBIO: Usar getDate(), getMonth(), getFullYear() (locales)
-  // en lugar de getUTCDate(), getUTCMonth(), getUTCFullYear()
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * ✅ NUEVO: Crea Date a partir de inputs DE HORA LOCAL
- * Esto es lo contrario: el usuario escribe 9:00 AM
- * Debemos guardar como UTC (si está en GMT-6, 9:00 AM local = 15:00 UTC)
- */
 export function dateAndTimeToDateLocal(
-  dateStr: string | undefined,
-  timeStr: string | undefined
+  date?: string | null,
+  time?: string | null,
+  timeZone?: string | null,
 ): Date | null {
-  if (!dateStr) return null;
+  if (!isValidDateInput(date)) return null;
 
-  const [year, month, day] = dateStr.split('-');
-  const [hours = '00', minutes = '00'] = (timeStr || '').split(':');
+  const tz = normalizeTimezone(timeZone);
+  const [year, month, day] = date.split('-').map(Number);
+  let hours = 0;
+  let minutes = 0;
 
+  if (isValidTimeInput(time)) {
+    const [h, m] = (time as string).split(':').map(Number);
+    hours = Number.isFinite(h) ? h : 0;
+    minutes = Number.isFinite(m) ? m : 0;
+  }
+
+  const candidate = new Date(Date.UTC(year, month - 1, day, hours, minutes, 0, 0));
+  if (tz === 'UTC') return candidate;
+
+  const offset = getTimezoneOffset(candidate, tz);
+  return new Date(candidate.getTime() - offset);
+}
+
+export function dateStringToStartOfDay(
+  date?: string | null,
+  timeZone?: string | null,
+): Date | null {
+  return dateAndTimeToDateLocal(date, '00:00', timeZone);
+}
+
+export function dateStringToEndOfDay(
+  date?: string | null,
+  timeZone?: string | null,
+): Date | null {
+  const base = dateAndTimeToDateLocal(date, '23:59', timeZone);
+  if (!base) return null;
+  return new Date(base.getTime() + 59 * 1000 + 999);
+}
+
+export function debugDateFull(date?: Date | null, timeZone?: string | null): string {
+  if (!date) return '—';
+  const tz = normalizeTimezone(timeZone);
+  const iso = date.toISOString();
   try {
-    // Crear Date en ZONA LOCAL
-    const date = new Date(
-      parseInt(year),
-      parseInt(month) - 1,
-      parseInt(day),
-      parseInt(hours),
-      parseInt(minutes),
-      0,
-      0
-    );
-
-    // JavaScript lo almacena internamente en UTC
-    // Así que cuando lo guardamos, es UTC correcto
-    return date;
+    const formatted = new Intl.DateTimeFormat('es-MX', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).format(date);
+    return `${iso} [${tz} ${formatted}]`;
   } catch {
-    return null;
+    return `${iso} [${tz}]`;
   }
 }
 
-/**
- * Debug completo
- */
-export function debugDateFull(label: string, date: Date | null | undefined) {
-  if (!date) {
-    console.log(`[${label}] → null/undefined`);
-    return;
-  }
+export type TimezoneHelpers = {
+  resolveBrowserTimezone: typeof resolveBrowserTimezone;
+  dateAndTimeToDateLocal: typeof dateAndTimeToDateLocal;
+  dateStringToStartOfDay: typeof dateStringToStartOfDay;
+  dateStringToEndOfDay: typeof dateStringToEndOfDay;
+  debugDateFull: typeof debugDateFull;
+};
 
-  const d = new Date(date);
-  const tz = getBrowserTimezone();
-  
-  console.log(`[${label}] - Zona: ${tz}`, {
-    isoString: d.toISOString(),
-    
-    // UTC (lo que se guarda en BD)
-    utcHours: d.getUTCHours(),
-    utcMinutes: d.getUTCMinutes(),
-    utcDate: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`,
-    
-    // LOCAL (lo que ve el usuario)
-    localHours: d.getHours(),
-    localMinutes: d.getMinutes(),
-    localDate: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-    
-    // Strings para inputs
-    timeStringLocal: dateToTimeStringLocal(d),
-    dateStringLocal: dateToDateStringLocal(d),
-  });
-}
+export const timezoneHelpers: TimezoneHelpers = {
+  resolveBrowserTimezone,
+  dateAndTimeToDateLocal,
+  dateStringToStartOfDay,
+  dateStringToEndOfDay,
+  debugDateFull,
+};

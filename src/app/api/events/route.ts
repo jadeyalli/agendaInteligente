@@ -769,6 +769,7 @@ const EventCreateSchema_EVENTO = z.object({
   start: zDate,  // requerido cuando repeat ≠ NONE
   end: zDate,
   isAllDay: z.boolean().optional(),
+  tzid: z.string().trim().min(1).optional(),
 
   window: z.nativeEnum(AvailabilityWindow).default('NONE'),
   windowStart: zDate,
@@ -865,6 +866,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
   const normalizedWindowStart = data.windowStart && !isUnsetDate(data.windowStart) ? data.windowStart : null;
   const normalizedWindowEnd = data.windowEnd && !isUnsetDate(data.windowEnd) ? data.windowEnd : null;
   const allowOverlap = data.priority === 'RECORDATORIO';
+  const tzid = typeof data.tzid === 'string' && data.tzid.trim() ? data.tzid.trim() : 'UTC';
 
   const needsSeries = data.repeat !== 'NONE';
   if (needsSeries && !normalizedStart) {
@@ -908,7 +910,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       transparency: (data.transparency as any) ?? null,
       status: data.status ?? 'SCHEDULED',
 
-      tzid: 'UTC',
+      tzid,
       isAllDay: Boolean(data.isAllDay),
     },
   });
@@ -946,7 +948,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
         transparency: (data.transparency as any) ?? null,
         status: data.status ?? 'SCHEDULED',
 
-        tzid: 'UTC',
+        tzid,
         isAllDay: Boolean(data.isAllDay),
       },
     })

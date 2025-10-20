@@ -17,12 +17,8 @@ import {
   dateAndTimeToDateLocal,
   dateStringToEndOfDay,
   dateStringToStartOfDay,
-} from "@/lib/datetime";
-
-import {
-  dateAndTimeToDateLocal,  // ✅ NUEVO: para crear Date desde inputs locales
-  debugDateFull,           // ✅ NUEVO: para debug
-} from '@/lib/timezone';
+  resolveBrowserTimezone,
+} from "@/lib/timezone";
 
 /** =========================================================
  * CreateEditModal
@@ -31,7 +27,6 @@ import {
 type Priority = "CRITICA" | "URGENTE" | "RELEVANTE" | "OPCIONAL" | "RECORDATORIO";
 type RepeatRule = "NONE" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 type AvailabilityWindow = "NONE" | "PRONTO" | "SEMANA" | "MES" | "RANGO";
-
 type EventForm = {
   kind: "EVENTO";
   title: string;
@@ -197,32 +192,26 @@ const defaultEvent = (): EventForm => ({
   timeStart: "",
   timeEnd: "",
 });
-
-const defaultReminder = (): ReminderForm => ({
-  kind: "RECORDATORIO",
+const defaultRequest = (): RequestForm => ({
+  kind: "SOLICITUD",
   title: "",
   description: "",
   category: "",
-  isAllDay: false,
-  repeat: "NONE",
+  shareLink: "",
+  window: "NONE",
+  windowStart: "",
+  windowEnd: "",
   date: "",
   timeStart: "",
   timeEnd: "",
 });
 
-// “Map a Prisma-like payload” para EVENTO (no solapable)
-import {
-  dateAndTimeToDate,
-  dateToDateString,
-  dateToTimeString,
-} from '@/lib/timezone';
-
-// Map para EVENTO (no solapable)
-function mapEvent(f: EventForm) {
-  const startAt = dateAndTimeToDateLocal(f.date, f.timeStart);
-  const endAt = dateAndTimeToDateLocal(f.date, f.timeEnd);
-  const windowStartAt = f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart) : null;
-  const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd) : null;
+// “Map a Prisma-like payload”
+function mapEvent(f: EventForm, timeZone: string) {
+  const startAt = dateAndTimeToDateLocal(f.date, f.timeStart, timeZone);
+  const endAt = dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone);
+  const windowStartAt = f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null;
+  const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null;
   const isAllDay = Boolean(f.date && !f.timeStart && !f.timeEnd);
 
   const base: any = {
@@ -236,6 +225,7 @@ function mapEvent(f: EventForm) {
     windowStart: windowStartAt,
     windowEnd: windowEndAt,
     isAllDay,
+    tzid: timeZone,
   };
 
   switch (f.priority) {
@@ -286,23 +276,10 @@ function mapEvent(f: EventForm) {
   }
 }
 
-// Map para RECORDATORIO (solapable, sin solver)
-function mapReminder(f: ReminderForm) {
-  const start = f.date
-    ? f.isAllDay
-      ? dateAndTimeToDateLocal(f.date, "00:00")
-      : dateAndTimeToDateLocal(f.date, f.timeStart)
-    : null;
-
-  const end = f.isAllDay
-    ? null
-    : f.date && f.timeEnd
-    ? dateAndTimeToDateLocal(f.date, f.timeEnd)
-    : null;
-
   debugDateFull('mapReminder START', start);
   debugDateFull('mapReminder END', end);
 
+function mapRequest(f: RequestForm, timeZone: string) {
   return {
     kind: "RECORDATORIO",
     title: f.title.trim(),
@@ -310,11 +287,12 @@ function mapReminder(f: ReminderForm) {
     category: f.category || null,
     shareLink: f.shareLink,
     window: f.window,
-    windowStart: f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart) : null,
-    windowEnd: f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd) : null,
-    start: dateAndTimeToDateLocal(f.date, f.timeStart),
-    end: dateAndTimeToDateLocal(f.date, f.timeEnd),
+    windowStart: f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null,
+    windowEnd: f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null,
+    start: dateAndTimeToDateLocal(f.date, f.timeStart, timeZone),
+    end: dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone),
     participatesInScheduling: true,
+    tzid: timeZone,
   };
 }
 
@@ -341,7 +319,11 @@ const Tabs: React.FC<{
   </div>
 );
 
-const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any) => void }> = ({ initial, onSubmit }) => {
+const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any) => void; timeZone: string }> = ({
+  initial,
+  onSubmit,
+  timeZone,
+}) => {
   const initEvent = useMemo<EventForm>(() => ({ ...defaultEvent(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<EventForm>(initEvent);
 
@@ -539,6 +521,35 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         </>
       )}
 
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
       {isOpcional && <p className={subtle}>Este elemento irá a la lista de espera y no requiere fecha u hora.</p>}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -548,7 +559,7 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         <button
           className={classNames(primary, !canSubmit && "opacity-50 cursor-not-allowed")}
           disabled={!canSubmit}
-          onClick={() => onSubmit(mapEvent(f))}
+          onClick={() => onSubmit(mapEvent(f, timeZone))}
           type="button"
         >
           Guardar
@@ -569,10 +580,14 @@ const CrearRecordatorio: React.FC<{ initial?: Partial<ReminderForm>; onSubmit: (
   const initReminder = useMemo<ReminderForm>(() => ({ ...defaultReminder(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<ReminderForm>(initReminder);
 
-  const canSubmit =
-    f.title.trim().length > 0 &&
-    f.date &&
-    (f.isAllDay ? true : Boolean(f.timeStart));
+const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data: any) => void; timeZone: string }> = ({
+  initial,
+  onSubmit,
+  timeZone,
+}) => {
+  const initRequest = useMemo<RequestForm>(() => ({ ...defaultRequest(), ...(initial ?? {}) }), [initial]);
+  const [f, set] = useState<RequestForm>(initRequest);
+  const canSubmit = f.title.trim().length > 0 && f.shareLink.trim().length > 0;
 
   return (
     <div className="space-y-4">
@@ -645,7 +660,7 @@ const CrearRecordatorio: React.FC<{ initial?: Partial<ReminderForm>; onSubmit: (
         <button
           className={classNames(primary, !canSubmit && "opacity-50 cursor-not-allowed")}
           disabled={!canSubmit}
-          onClick={() => onSubmit(mapReminder(f))}
+          onClick={() => onSubmit(mapRequest(f, timeZone))}
           type="button"
         >
           Guardar
@@ -667,6 +682,7 @@ export default function CreateEditModal({
 }: Props) {
   const [tab, setTab] = useState<"evento" | "recordatorio">(initialTab);
   const derivedTitle = title ?? (mode === "edit" ? "Editar" : "Crear");
+  const timeZone = useMemo(() => resolveBrowserTimezone(), []);
 
   return (
     <ModalShell open={open} onClose={onClose} title={derivedTitle}>
@@ -683,6 +699,7 @@ export default function CreateEditModal({
         <CrearEvento
           initial={{ kind: "EVENTO", ...(initialValues ?? {}) }}
           onSubmit={onSubmit}
+          timeZone={timeZone}
         />
       )}
 
@@ -690,6 +707,7 @@ export default function CreateEditModal({
         <CrearRecordatorio
           initial={{ kind: "RECORDATORIO", ...(initialValues ?? {}) }}
           onSubmit={onSubmit}
+          timeZone={timeZone}
         />
       )}
     </ModalShell>
