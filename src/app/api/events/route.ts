@@ -6,21 +6,25 @@ import {
   Priority,
   RepeatRule,
   ICalTodoStatus,
+  ICalTransparency,
   Prisma,
   Event,
 } from '@prisma/client';
+
+const REMINDER_PRIORITY = 'RECORDATORIO' as unknown as Priority;
 
 const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
   UI: 'CRITICA',
   UNI: 'URGENTE',
   INU: 'RELEVANTE',
   NN: 'OPCIONAL',
-  REMINDER: 'RECORDATORIO',
-  REMINDERS: 'RECORDATORIO',
-  RECORDATORIOS: 'RECORDATORIO',
+  RECORDATORIO: REMINDER_PRIORITY,
+  REMINDER: REMINDER_PRIORITY,
+  REMINDERS: REMINDER_PRIORITY,
+  RECORDATORIOS: REMINDER_PRIORITY,
 };
 
-const PRIORITY_RANK: Record<Priority, number> = {
+const PRIORITY_RANK: Record<string, number> = {
   CRITICA: 4,
   URGENTE: 3,
   RELEVANTE: 2,
@@ -113,7 +117,9 @@ const PrioritySchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid priority' });
       return z.NEVER;
     }
-    return normalized;
+    return normalized === REMINDER_PRIORITY
+      ? (REMINDER_PRIORITY as Priority)
+      : (normalized as Priority);
   });
 
 function priorityPolicy(priority: Priority): {
@@ -127,7 +133,7 @@ function priorityPolicy(priority: Priority): {
     case 'URGENTE':
     case 'RELEVANTE':
       return { participatesInScheduling: true, isFixed: false, status: 'SCHEDULED' };
-    case 'RECORDATORIO':
+    case REMINDER_PRIORITY:
       return { participatesInScheduling: false, isFixed: false, status: 'SCHEDULED' };
     case 'OPCIONAL':
     default:
@@ -220,29 +226,7 @@ export async function PATCH(req: Request) {
       data.participatesInScheduling = policy.participatesInScheduling;
       data.isFixed = policy.isFixed;
 
-      if (data.priority === 'RECORDATORIO') {
-        data.status = data.status ?? 'SCHEDULED';
-        data.window = 'NONE';
-        data.windowStart = null;
-        data.windowEnd = null;
-      } else if (policy.status === 'WAITLIST') {
-        data.status = 'WAITLIST';
-        data.start = null;
-        data.end = null;
-        data.window = 'NONE';
-        data.windowStart = null;
-        data.windowEnd = null;
-      } else {
-        data.status = data.status ?? 'SCHEDULED';
-      }
-    }
-
-    if (data.priority) {
-      const policy = priorityPolicy(data.priority);
-      data.participatesInScheduling = policy.participatesInScheduling;
-      data.isFixed = policy.isFixed;
-
-      if (data.priority === 'RECORDATORIO') {
+      if (data.priority === REMINDER_PRIORITY) {
         data.status = data.status ?? 'SCHEDULED';
         data.window = 'NONE';
         data.windowStart = null;
@@ -277,7 +261,7 @@ export async function PATCH(req: Request) {
 
         participatesInScheduling: data.participatesInScheduling,
         isFixed: data.isFixed,
-        canOverlap: data.priority ? (data.priority === 'RECORDATORIO' ? true : false) : undefined,
+        canOverlap: data.priority ? (data.priority === REMINDER_PRIORITY ? true : false) : undefined,
         status: data.status,
 
         window: data.window,
@@ -531,7 +515,7 @@ function upsertWeightedInterval(
 }
 
 function priorityWeight(priority: Priority): number {
-  return PRIORITY_RANK[priority] ?? 0;
+  return PRIORITY_RANK[priority as unknown as string] ?? 0;
 }
 
 function lowerPriorityTargets(priority: Priority): Priority[] {
@@ -805,6 +789,9 @@ const EventCreateSchema_EVENTO = z.object({
   isFixed: z.boolean().optional(),
   participatesInScheduling: z.boolean().optional(),
   status: z.string().optional(),
+  transparency: z.nativeEnum(ICalTransparency).nullish(),
+  canOverlap: z.boolean().optional(),
+  isInPerson: z.boolean().optional(),
 
   calendarId: z.string().nullish(),
 });
@@ -836,6 +823,7 @@ const EventCreateSchema_RECORDATORIO = z.object({
   isAllDay: z.boolean().default(false),
   start: zDate,      // fecha opcional para recordatorios
   end: zDate,        // hora fin opcional
+  tzid: z.string().trim().min(1).optional(),
   calendarId: z.string().nullish(),
 });
 
@@ -856,7 +844,7 @@ function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreate
   next.isFixed = policy.isFixed;
   next.status = policy.status;
 
-  if (next.priority === 'RECORDATORIO') {
+  if (next.priority === REMINDER_PRIORITY) {
     next.participatesInScheduling = false;
     next.isFixed = false;
     next.status = 'SCHEDULED';
@@ -891,7 +879,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
   const normalizedEnd = data.end && !isUnsetDate(data.end) ? data.end : null;
   const normalizedWindowStart = data.windowStart && !isUnsetDate(data.windowStart) ? data.windowStart : null;
   const normalizedWindowEnd = data.windowEnd && !isUnsetDate(data.windowEnd) ? data.windowEnd : null;
-  const allowOverlap = data.priority === 'RECORDATORIO';
+  const allowOverlap = data.priority === REMINDER_PRIORITY;
   const tzid = typeof data.tzid === 'string' && data.tzid.trim() ? data.tzid.trim() : 'UTC';
 
   const needsSeries = data.repeat !== 'NONE';
@@ -906,7 +894,18 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       : null;
 
   const baseStart = normalizedStart ?? null;
-  const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [{ start: null as any, end: null }];
+  const occurrences = baseStart
+    ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat)
+    : [
+        {
+          start: normalizedStart ?? null,
+          end: normalizedEnd ?? null,
+        },
+      ];
+
+  const [firstOccurrence, ...restOccurrences] = occurrences;
+  const firstStart = firstOccurrence?.start ?? null;
+  const firstEnd = firstOccurrence?.end ?? null;
 
   const master = await prisma.event.create({
     data: {
@@ -941,10 +940,10 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
     },
   });
 
-  if (!needsSeries || series.length <= 1) return [master];
+  if (!needsSeries || restOccurrences.length === 0) return [master];
 
   // Instancias hijas planas (repeat = NONE)
-  const tx = series.slice(1).map(({ start, end }) =>
+  const tx = restOccurrences.map(({ start, end }) =>
     prisma.event.create({
       data: {
         userId,
@@ -1072,6 +1071,107 @@ async function createTaskSeries(userId: string, data: z.infer<typeof EventCreate
   return [master, ...children];
 }
 
+/** ============== creación series RECORDATORIO ============== */
+async function createReminderSeries(
+  userId: string,
+  data: z.infer<typeof EventCreateSchema_RECORDATORIO>,
+) {
+  const normalizedStart = data.start && !isUnsetDate(data.start) ? data.start : null;
+  const normalizedEnd = data.end && !isUnsetDate(data.end) ? data.end : null;
+  const tzid = typeof data.tzid === 'string' && data.tzid.trim() ? data.tzid.trim() : 'UTC';
+
+  const needsSeries = data.repeat !== 'NONE';
+  if (needsSeries && !normalizedStart) {
+    throw new Error('Para repetir un recordatorio debes proporcionar fecha de inicio.');
+  }
+
+  const occurrences = normalizedStart
+    ? buildSeries(normalizedStart, normalizedEnd ?? null, data.repeat)
+    : [
+        {
+          start: normalizedStart,
+          end: normalizedEnd,
+        },
+      ];
+
+  const [firstOccurrence, ...restOccurrences] = occurrences;
+  const firstStart = firstOccurrence?.start ?? normalizedStart ?? null;
+  const firstEnd = firstOccurrence?.end ?? normalizedEnd ?? null;
+
+  const master = await prisma.event.create({
+    data: {
+      userId,
+      calendarId: data.calendarId ?? null,
+      kind: 'RECORDATORIO',
+      title: data.title,
+      description: data.description ?? null,
+      category: data.category ?? null,
+
+      priority: REMINDER_PRIORITY,
+      repeat: data.repeat,
+      rrule:
+        needsSeries && normalizedStart
+          ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${normalizedStart.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
+          : null,
+
+      start: firstStart,
+      end: firstEnd,
+      isAllDay: Boolean(data.isAllDay),
+      tzid,
+
+      isInPerson: true,
+      canOverlap: true,
+      participatesInScheduling: false,
+      isFixed: false,
+      transparency: 'TRANSPARENT',
+      status: 'SCHEDULED',
+
+      window: 'NONE',
+      windowStart: null,
+      windowEnd: null,
+    },
+  });
+
+  if (!needsSeries || restOccurrences.length === 0) return [master];
+
+  const tx = restOccurrences.map(({ start, end }) =>
+    prisma.event.create({
+      data: {
+        userId,
+        calendarId: data.calendarId ?? null,
+        kind: 'RECORDATORIO',
+        title: data.title,
+        description: data.description ?? null,
+        category: data.category ?? null,
+
+        priority: REMINDER_PRIORITY,
+        repeat: 'NONE',
+        rrule: null,
+        originEventId: master.id,
+
+        start,
+        end,
+        isAllDay: Boolean(data.isAllDay),
+        tzid,
+
+        isInPerson: true,
+        canOverlap: true,
+        participatesInScheduling: false,
+        isFixed: false,
+        transparency: 'TRANSPARENT',
+        status: 'SCHEDULED',
+
+        window: 'NONE',
+        windowStart: null,
+        windowEnd: null,
+      },
+    })
+  );
+
+  const children = await prisma.$transaction(tx);
+  return [master, ...children];
+}
+
 /** ================== handlers ================== */
 export async function POST(req: Request) {
   try {
@@ -1085,7 +1185,7 @@ export async function POST(req: Request) {
     const data = parsed.data;
     const user = await ensureDemoUser();
 
-    let items;
+    let items: Event[];
     if (data.kind === 'EVENTO') {
       const normalized = applyPriorityPolicyToEventCreate(data);
       const created = await createEventSeries(user.id, normalized);
@@ -1096,10 +1196,9 @@ export async function POST(req: Request) {
       const refreshed = await prisma.event.findMany({ where: { id: { in: createdIds } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
-    } else {
+    } else if (data.kind === 'TAREA') {
       items = await createTaskSeries(user.id, data);
     } else if (data.kind === 'RECORDATORIO') {
-      // ← Agregar manejo para RECORDATORIO
       items = await createReminderSeries(user.id, data);
     } else {
       throw new Error('Invalid event kind');

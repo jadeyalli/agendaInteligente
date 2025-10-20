@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
+import type { EventInput } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
@@ -14,11 +15,10 @@ import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/Eve
 
 import { THEMES, currentTheme } from '@/theme/themes';
 import {
-  dateToDateStringLocal,      // ✅ NUEVO
-  dateToTimeStringLocal,       // ✅ NUEVO
-  dateAndTimeToDateLocal,      // ✅ NUEVO
-  debugDateFull,               // ✅ NUEVO (para debug)
+  dateToDateStringLocal,
+  dateToTimeStringLocal,
   isoToDate,
+  resolveBrowserTimezone,
 } from '@/lib/timezone';
 
 export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
@@ -29,7 +29,7 @@ type PriorityCode = 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDAT
 
 type EventRow = {
   id: string;
-  kind: 'EVENTO' | 'TAREA' | 'SOLICITUD';
+  kind: 'EVENTO' | 'TAREA' | 'SOLICITUD' | 'RECORDATORIO';
   title: string;
   description?: string | null;
   category?: string | null;
@@ -62,16 +62,19 @@ type ModalInitialEvent = {
   timeEnd: string;
 };
 
-type ModalInitialTask = {
-  kind: 'TAREA';
+type ModalInitialReminder = {
+  kind: 'RECORDATORIO';
   title: string;
   description: string;
   category: string;
   repeat: 'NONE';
-  dueDate: string;
+  isAllDay: boolean;
+  date: string;
+  timeStart: string;
+  timeEnd: string;
 };
 
-type ModalInitial = ModalInitialEvent | ModalInitialTask;
+type ModalInitial = ModalInitialEvent | ModalInitialReminder;
 
 export default function Calendar({ onViewChange }: CalendarProps) {
   // === tema (escucha cambios emitidos por la página) ===
@@ -92,6 +95,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
   const [openEdit, setOpenEdit] = useState(false);
   const [editInitial, setEditInitial] = useState<ModalInitial | null>(null);
+  const [editTab, setEditTab] = useState<'evento' | 'recordatorio'>('evento');
+  const browserTimeZone = useMemo(() => resolveBrowserTimezone(), []);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [openImport, setOpenImport] = useState(false);
@@ -202,41 +207,44 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
   }
 
-function mapRowToEditInitial(row: EventRow) {
-  // Si es TAREA
+function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | null {
   if (row.kind === 'TAREA') {
-    const dueDate = row.dueDate ? isoToDate(row.dueDate) : null;
+    return null;
+  }
+
+  if (row.kind === 'RECORDATORIO' || row.priority === 'RECORDATORIO') {
+    const startDate = row.start ? isoToDate(row.start) : null;
+    const endDate = row.end ? isoToDate(row.end) : null;
+
     return {
-      kind: 'TAREA',
+      kind: 'RECORDATORIO',
       title: row.title,
       description: row.description ?? '',
       category: row.category ?? '',
-      priority: (row.priority ?? 'RELEVANTE') as any,
       repeat: 'NONE',
-      dueDate: dateToDateStringLocal(dueDate),  // ✅ CAMBIO: dateToDateStringLocal
+      isAllDay: !!row.isAllDay,
+      date: dateToDateStringLocal(startDate, timeZone),
+      timeStart: dateToTimeStringLocal(startDate, timeZone),
+      timeEnd: dateToTimeStringLocal(endDate, timeZone),
     };
   }
 
-  // Si es EVENTO o RECORDATORIO
+  // Si es EVENTO
   const startDate = row.start ? isoToDate(row.start) : null;
   const endDate = row.end ? isoToDate(row.end) : null;
-
-  // ✅ DEBUG
-  debugDateFull('START en mapRowToEditInitial', startDate);
-  debugDateFull('END en mapRowToEditInitial', endDate);
 
   return {
     kind: 'EVENTO',
     title: row.title,
     description: row.description ?? '',
     category: row.category ?? '',
-    priority: (row.priority ?? 'RELEVANTE') as any,
+    priority: (row.priority ?? 'RELEVANTE') as PriorityCode,
     repeat: 'NONE',
     window: 'NONE',
     // ✅ CAMBIOS PRINCIPALES:
-    date: dateToDateStringLocal(startDate),      // Local, no UTC
-    timeStart: dateToTimeStringLocal(startDate), // Local, no UTC
-    timeEnd: dateToTimeStringLocal(endDate),     // Local, no UTC
+    date: dateToDateStringLocal(startDate, timeZone),
+    timeStart: dateToTimeStringLocal(startDate, timeZone),
+    timeEnd: dateToTimeStringLocal(endDate, timeZone),
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======
@@ -514,7 +522,7 @@ function mapRowToEditInitial(row: EventRow) {
       <CreateEditModal
         open={openEdit}
         mode="edit"
-        initialTab="evento"
+        initialTab={editTab}
         initialValues={editInitial ?? undefined}
         onSubmit={handleEditFromModal}
         onClose={() => {
@@ -538,7 +546,17 @@ function mapRowToEditInitial(row: EventRow) {
         onEdit={(e) => {
           setOpenPreview(false);
           setEditingId(e.id);
-          setEditInitial(mapRowToEditInitial(e));
+          const initial = mapRowToEditInitial(e, browserTimeZone);
+          if (!initial) {
+            alert('Este tipo de elemento no se puede editar desde aquí todavía.');
+            return;
+          }
+          setEditInitial(initial);
+          if (initial.kind === 'RECORDATORIO') {
+            setEditTab('recordatorio');
+          } else {
+            setEditTab('evento');
+          }
           setOpenEdit(true);
         }}
         onDelete={(e) => { void handleDelete(e); }}

@@ -1,18 +1,19 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  X,
-  Type as TypeIcon,
-  FolderOpen,
+  Calendar,
+  CalendarRange,
+  Clock,
   FileText,
   Flag,
-  Calendar,
-  Clock,
+  FolderOpen,
   Repeat as RepeatIcon,
-  CalendarRange,
+  Type as TypeIcon,
+  X,
 } from "lucide-react";
+
 import {
   dateAndTimeToDateLocal,
   dateStringToEndOfDay,
@@ -27,6 +28,7 @@ import {
 type Priority = "CRITICA" | "URGENTE" | "RELEVANTE" | "OPCIONAL" | "RECORDATORIO";
 type RepeatRule = "NONE" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 type AvailabilityWindow = "NONE" | "PRONTO" | "SEMANA" | "MES" | "RANGO";
+
 type EventForm = {
   kind: "EVENTO";
   title: string;
@@ -47,11 +49,11 @@ type ReminderForm = {
   title: string;
   description?: string;
   category?: string;
-  isAllDay: boolean;
   repeat: RepeatRule;
-  date?: string;       // required in UI
-  timeStart?: string;  // optional if isAllDay
-  timeEnd?: string;    // optional
+  isAllDay: boolean;
+  date?: string;
+  timeStart?: string;
+  timeEnd?: string;
 };
 
 type EventSubmitPayload = {
@@ -75,28 +77,26 @@ type EventSubmitPayload = {
   calendarId?: string | null;
 };
 
-type RequestSubmitPayload = {
-  kind: "SOLICITUD";
+type ReminderSubmitPayload = {
+  kind: "RECORDATORIO";
   title: string;
   description: string | null;
   category: string | null;
-  shareLink: string;
-  window: AvailabilityWindow;
-  windowStart: Date | null;
-  windowEnd: Date | null;
+  repeat: RepeatRule;
+  isAllDay: boolean;
   start: Date | null;
   end: Date | null;
-  participatesInScheduling: boolean;
   tzid: string;
+  calendarId?: string | null;
 };
 
-export type CreateModalSubmitPayload = EventSubmitPayload | RequestSubmitPayload;
+export type CreateModalSubmitPayload = EventSubmitPayload | ReminderSubmitPayload;
 
 type Props = {
   open: boolean;
   mode?: "create" | "edit";
   initialTab?: "evento" | "recordatorio";
-  initialValues?: Partial<EventForm & ReminderForm>;
+  initialValues?: Partial<EventForm> | Partial<ReminderForm>;
   title?: string;
   onSubmit: (payload: CreateModalSubmitPayload) => void;
   onClose: () => void;
@@ -106,7 +106,7 @@ type Props = {
 const classNames = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 const card = "bg-white shadow-sm rounded-2xl border border-slate-200";
 const inputBase =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800F placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400";
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400";
 const labelBase = "inline-flex items-center gap-2 text-sm font-medium text-slate-700";
 const subtle = "text-slate-500 text-sm";
 const button =
@@ -139,7 +139,7 @@ const ModalShell: React.FC<{
           transition={{ type: "spring", stiffness: 250, damping: 24 }}
           className={classNames(
             card,
-            "relative z-10 w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+            "relative z-10 w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden",
           )}
         >
           <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -205,12 +205,15 @@ const Field: React.FC<{
 const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>
 );
+
 const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (p) => (
   <select {...p} className={classNames(inputBase, p.className || "")} />
 );
+
 const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (p) => (
   <input {...p} className={classNames(inputBase, p.className || "")} />
 );
+
 const Textarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = (p) => (
   <textarea {...p} className={classNames(inputBase, "min-h-[92px]", p.className || "")} />
 );
@@ -230,33 +233,31 @@ const defaultEvent = (): EventForm => ({
   timeStart: "",
   timeEnd: "",
 });
-const defaultRequest = (): RequestForm => ({
-  kind: "SOLICITUD",
+
+const defaultReminder = (): ReminderForm => ({
+  kind: "RECORDATORIO",
   title: "",
   description: "",
   category: "",
-  shareLink: "",
-  window: "NONE",
-  windowStart: "",
-  windowEnd: "",
+  repeat: "NONE",
+  isAllDay: false,
   date: "",
   timeStart: "",
   timeEnd: "",
 });
 
-// “Map a Prisma-like payload”
-function mapEvent(f: EventForm, timeZone: string) {
+function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
   const startAt = dateAndTimeToDateLocal(f.date, f.timeStart, timeZone);
   const endAt = dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone);
   const windowStartAt = f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null;
   const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null;
   const isAllDay = Boolean(f.date && !f.timeStart && !f.timeEnd);
 
-  const base: any = {
+  const base: EventSubmitPayload = {
     kind: "EVENTO",
     title: f.title.trim(),
     description: f.description?.trim() || null,
-    category: f.category || null,
+    category: f.category?.trim() || null,
     priority: f.priority,
     repeat: f.repeat,
     window: f.window,
@@ -264,34 +265,16 @@ function mapEvent(f: EventForm, timeZone: string) {
     windowEnd: windowEndAt,
     isAllDay,
     tzid: timeZone,
+    participatesInScheduling: true,
+    isFixed: false,
+    transparency: "OPAQUE",
+    status: "SCHEDULED",
+    start: startAt,
+    end: endAt,
   };
 
   switch (f.priority) {
-    case "RECORDATORIO": {
-      return {
-        ...base,
-        participatesInScheduling: false,
-        status: "SCHEDULED",
-        window: "NONE",
-        windowStart: null,
-        windowEnd: null,
-        start: startAt,
-        end: endAt,
-      };
-    }
-    case "OPCIONAL": {
-      return {
-        ...base,
-        status: "WAITLIST",
-        participatesInScheduling: false,
-        window: "NONE",
-        windowStart: null,
-        windowEnd: null,
-        start: null,
-        end: null,
-      };
-    }
-    case "CRITICA": {
+    case "CRITICA":
       return {
         ...base,
         isFixed: true,
@@ -300,42 +283,63 @@ function mapEvent(f: EventForm, timeZone: string) {
         start: startAt,
         end: endAt,
       };
-    }
-    default: {
+    case "URGENTE":
+    case "RELEVANTE":
       return {
         ...base,
         isFixed: false,
         participatesInScheduling: true,
         transparency: "OPAQUE",
+      };
+    case "OPCIONAL":
+      return {
+        ...base,
+        participatesInScheduling: false,
+        status: "WAITLIST",
+        start: null,
+        end: null,
+        window: "NONE",
+        windowStart: null,
+        windowEnd: null,
+      };
+    case "RECORDATORIO":
+      return {
+        ...base,
+        participatesInScheduling: false,
+        isFixed: false,
+        transparency: "TRANSPARENT",
         start: startAt,
         end: endAt,
+        window: "NONE",
+        windowStart: null,
+        windowEnd: null,
       };
-    }
+    default:
+      return base;
   }
 }
 
-  debugDateFull('mapReminder START', start);
-  debugDateFull('mapReminder END', end);
+function mapReminder(f: ReminderForm, timeZone: string): ReminderSubmitPayload {
+  const startAt = dateAndTimeToDateLocal(f.date, f.isAllDay ? "00:00" : f.timeStart, timeZone);
+  const endAt = f.isAllDay
+    ? startAt
+    : dateAndTimeToDateLocal(f.date, f.timeEnd || f.timeStart, timeZone);
 
-function mapRequest(f: RequestForm, timeZone: string) {
   return {
     kind: "RECORDATORIO",
     title: f.title.trim(),
     description: f.description?.trim() || null,
-    category: f.category || null,
-    shareLink: f.shareLink,
-    window: f.window,
-    windowStart: f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null,
-    windowEnd: f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null,
-    start: dateAndTimeToDateLocal(f.date, f.timeStart, timeZone),
-    end: dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone),
-    participatesInScheduling: true,
+    category: f.category?.trim() || null,
+    repeat: f.repeat,
+    isAllDay: f.isAllDay,
+    start: startAt,
+    end: endAt,
     tzid: timeZone,
   };
 }
 
 /* ------------------------- formularios --------------------------- */
-type TabId = "evento" | "solicitud";
+type TabId = "evento" | "recordatorio";
 
 const Tabs: React.FC<{
   tabs: { id: TabId; label: string }[];
@@ -348,7 +352,9 @@ const Tabs: React.FC<{
         key={t.id}
         className={classNames(
           "px-3 py-1.5 rounded-xl border text-sm transition",
-          value === t.id ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+          value === t.id
+            ? "bg-slate-900 text-white border-slate-900"
+            : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50",
         )}
         onClick={() => onChange(t.id)}
         type="button"
@@ -359,7 +365,7 @@ const Tabs: React.FC<{
   </div>
 );
 
-const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any) => void; timeZone: string }> = ({
+const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: EventSubmitPayload) => void; timeZone: string }> = ({
   initial,
   onSubmit,
   timeZone,
@@ -368,20 +374,8 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
   const [f, set] = useState<EventForm>(initEvent);
 
   useEffect(() => {
-    if (initial?.date || initial?.timeStart) {
-      console.log('🔍 CrearEvento - Valores iniciales recibidos:', {
-        date: initial.date,
-        timeStart: initial.timeStart,
-        timeEnd: initial.timeEnd,
-        formState: {
-          date: f.date,
-          timeStart: f.timeStart,
-          timeEnd: f.timeEnd,
-        },
-      });
-    }
-  }, [initial?.date, initial?.timeStart, initial?.timeEnd]);
-
+    set((prev) => ({ ...prev, ...initEvent }));
+  }, [initEvent]);
 
   const isCritica = f.priority === "CRITICA";
   const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
@@ -397,7 +391,9 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         </Field>
         <Field label="Categoría" labelIcon={<FolderOpen className="h-4 w-4" />}>
           <Select value={f.category ?? ""} onChange={(e) => set({ ...f, category: e.target.value })}>
-            <option value="" disabled>Selecciona una categoría…</option>
+            <option value="" disabled>
+              Selecciona una categoría…
+            </option>
             <option value="Escuela">Escuela</option>
             <option value="Trabajo">Trabajo</option>
             <option value="Personal">Personal</option>
@@ -506,7 +502,7 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
       {isReminder && (
         <>
           <Row>
-            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}>
               <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
             </Field>
             <div className="grid grid-cols-2 gap-4">
@@ -528,130 +524,18 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
                 <option value="YEARLY">Anual</option>
               </Select>
             </Field>
+            <div />
           </Row>
-        </>
-      )}
-
-      {isReminder && (
-        <>
-          <Row>
-            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
-              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
-            </Field>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
-              </Field>
-              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
-              </Field>
-            </div>
-          </Row>
-          <Row>
-            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
-              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
-                <option value="NONE">No repetir</option>
-                <option value="DAILY">Diario</option>
-                <option value="WEEKLY">Semanal</option>
-                <option value="MONTHLY">Mensual</option>
-                <option value="YEARLY">Anual</option>
-              </Select>
-            </Field>
-          </Row>
-        </>
-      )}
-
-      {isReminder && (
-        <>
-          <Row>
-            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
-              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
-            </Field>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
-              </Field>
-              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
-              </Field>
-            </div>
-          </Row>
-          <Row>
-            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
-              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
-                <option value="NONE">No repetir</option>
-                <option value="DAILY">Diario</option>
-                <option value="WEEKLY">Semanal</option>
-                <option value="MONTHLY">Mensual</option>
-                <option value="YEARLY">Anual</option>
-              </Select>
-            </Field>
-          </Row>
-        </>
-      )}
-
-      {isReminder && (
-        <>
-          <Row>
-            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
-              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
-            </Field>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
-              </Field>
-              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
-              </Field>
-            </div>
-          </Row>
-          <Row>
-            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
-              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
-                <option value="NONE">No repetir</option>
-                <option value="DAILY">Diario</option>
-                <option value="WEEKLY">Semanal</option>
-                <option value="MONTHLY">Mensual</option>
-                <option value="YEARLY">Anual</option>
-              </Select>
-            </Field>
-          </Row>
-        </>
-      )}
-
-      {isReminder && (
-        <>
-          <Row>
-            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
-              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
-            </Field>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
-              </Field>
-              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
-              </Field>
-            </div>
-          </Row>
-          <Row>
-            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
-              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
-                <option value="NONE">No repetir</option>
-                <option value="DAILY">Diario</option>
-                <option value="WEEKLY">Semanal</option>
-                <option value="MONTHLY">Mensual</option>
-                <option value="YEARLY">Anual</option>
-              </Select>
-            </Field>
-          </Row>
+          <p className={subtle}>
+            Los recordatorios de alta prioridad pueden solaparse con otros eventos y se consideran transparencia &quot;TRANSPARENT&quot;.
+          </p>
         </>
       )}
 
       {isOpcional && <p className={subtle}>Este elemento irá a la lista de espera y no requiere fecha u hora.</p>}
 
       <div className="flex justify-end gap-2 pt-2">
-        <button className={button} type="button" onClick={() => set(initEvent)}>
+        <button className={button} type="button" onClick={() => set(defaultEvent())}>
           Limpiar
         </button>
         <button
@@ -663,42 +547,41 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
           Guardar
         </button>
       </div>
-      {process.env.NODE_ENV === 'development' && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 font-mono">
-          <div>Fecha: {f.date || '(vacío)'}</div>
-          <div>Hora inicio: {f.timeStart || '(vacío)'}</div>
-          <div>Hora fin: {f.timeEnd || '(vacío)'}</div>
-        </div>
-      )}
     </div>
   );
 };
 
-const CrearRecordatorio: React.FC<{ initial?: Partial<ReminderForm>; onSubmit: (data: any) => void }> = ({ initial, onSubmit }) => {
+const CrearRecordatorio: React.FC<{
+  initial?: Partial<ReminderForm>;
+  onSubmit: (data: ReminderSubmitPayload) => void;
+  timeZone: string;
+}> = ({ initial, onSubmit, timeZone }) => {
   const initReminder = useMemo<ReminderForm>(() => ({ ...defaultReminder(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<ReminderForm>(initReminder);
 
-const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data: any) => void; timeZone: string }> = ({
-  initial,
-  onSubmit,
-  timeZone,
-}) => {
-  const initRequest = useMemo<RequestForm>(() => ({ ...defaultRequest(), ...(initial ?? {}) }), [initial]);
-  const [f, set] = useState<RequestForm>(initRequest);
-  const canSubmit = f.title.trim().length > 0 && f.shareLink.trim().length > 0;
+  useEffect(() => {
+    set((prev) => ({ ...prev, ...initReminder }));
+  }, [initReminder]);
+
+  const canSubmit =
+    f.title.trim().length > 0 &&
+    Boolean(f.date) &&
+    (f.isAllDay || Boolean(f.timeStart));
 
   return (
     <div className="space-y-4">
       <Row>
         <Field label="Título" labelIcon={<TypeIcon className="h-4 w-4" />}>
-          <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Ej. Reunión virtual, Cumpleaños, Nota" />
+          <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Ej. Pagar servicio, Tomar agua" />
         </Field>
         <Field label="Categoría" labelIcon={<FolderOpen className="h-4 w-4" />}>
           <Select value={f.category ?? ""} onChange={(e) => set({ ...f, category: e.target.value })}>
-            <option value="" disabled>Selecciona una categoría…</option>
-            <option value="Escuela">Escuela</option>
-            <option value="Trabajo">Trabajo</option>
+            <option value="" disabled>
+              Selecciona una categoría…
+            </option>
             <option value="Personal">Personal</option>
+            <option value="Trabajo">Trabajo</option>
+            <option value="Salud">Salud</option>
           </Select>
         </Field>
       </Row>
@@ -747,18 +630,16 @@ const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data
         <div />
       </Row>
 
-      <p className={subtle}>
-        Los recordatorios pueden solaparse y no usan el motor de disponibilidad. Son notas visibles en el calendario.
-      </p>
+      <p className={subtle}>Los recordatorios se muestran como notas rápidas y pueden coexistir con otros eventos.</p>
 
       <div className="flex justify-end gap-2 pt-2">
-        <button className={button} type="button" onClick={() => set(initReminder)}>
+        <button className={button} type="button" onClick={() => set(defaultReminder())}>
           Limpiar
         </button>
         <button
           className={classNames(primary, !canSubmit && "opacity-50 cursor-not-allowed")}
           disabled={!canSubmit}
-          onClick={() => onSubmit(mapRequest(f, timeZone))}
+          onClick={() => onSubmit(mapReminder(f, timeZone))}
           type="button"
         >
           Guardar
@@ -778,9 +659,19 @@ export default function CreateEditModal({
   onSubmit,
   onClose,
 }: Props) {
-  const [tab, setTab] = useState<"evento" | "recordatorio">(initialTab);
+  const [tab, setTab] = useState<TabId>(initialTab);
   const derivedTitle = title ?? (mode === "edit" ? "Editar" : "Crear");
   const timeZone = useMemo(() => resolveBrowserTimezone(), []);
+
+  useEffect(() => {
+    if (open) {
+      setTab(initialTab);
+    }
+  }, [initialTab, open]);
+
+  const isReminderInitial = initialValues && "kind" in initialValues && initialValues.kind === "RECORDATORIO";
+  const eventInitial = !isReminderInitial ? (initialValues as Partial<EventForm> | undefined) : undefined;
+  const reminderInitial = isReminderInitial ? (initialValues as Partial<ReminderForm>) : undefined;
 
   return (
     <ModalShell open={open} onClose={onClose} title={derivedTitle}>
@@ -794,19 +685,11 @@ export default function CreateEditModal({
       />
 
       {tab === "evento" && (
-        <CrearEvento
-          initial={{ ...(initialValues ?? {}), kind: "EVENTO" }}
-          onSubmit={onSubmit}
-          timeZone={timeZone}
-        />
+        <CrearEvento initial={{ ...(eventInitial ?? {}), kind: "EVENTO" }} onSubmit={onSubmit} timeZone={timeZone} />
       )}
 
       {tab === "recordatorio" && (
-        <CrearRecordatorio
-          initial={{ kind: "RECORDATORIO", ...(initialValues ?? {}) }}
-          onSubmit={onSubmit}
-          timeZone={timeZone}
-        />
+        <CrearRecordatorio initial={{ ...(reminderInitial ?? {}), kind: "RECORDATORIO" }} onSubmit={onSubmit} timeZone={timeZone} />
       )}
     </ModalShell>
   );
