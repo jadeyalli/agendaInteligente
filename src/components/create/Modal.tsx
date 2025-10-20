@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -13,6 +13,11 @@ import {
   Repeat as RepeatIcon,
   CalendarRange,
 } from "lucide-react";
+
+import {
+  dateAndTimeToDateLocal,  // ✅ NUEVO: para crear Date desde inputs locales
+  debugDateFull,           // ✅ NUEVO: para debug
+} from '@/lib/timezone';
 
 /** =========================================================
  * CreateEditModal
@@ -63,7 +68,7 @@ type Props = {
 const classNames = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 const card = "bg-white shadow-sm rounded-2xl border border-slate-200";
 const inputBase =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400";
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800F placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400";
 const labelBase = "inline-flex items-center gap-2 text-sm font-medium text-slate-700";
 const subtle = "text-slate-500 text-sm";
 const button =
@@ -201,6 +206,13 @@ const defaultReminder = (): ReminderForm => ({
 });
 
 // “Map a Prisma-like payload” para EVENTO (no solapable)
+import {
+  dateAndTimeToDate,
+  dateToDateString,
+  dateToTimeString,
+} from '@/lib/timezone';
+
+// Map para EVENTO (no solapable)
 function mapEvent(f: EventForm) {
   const base: any = {
     kind: "EVENTO",
@@ -209,55 +221,84 @@ function mapEvent(f: EventForm) {
     category: f.category || null,
     priority: f.priority,
     repeat: f.repeat,
-    // reglas nuevas: todos los EVENTO no solapan
     isInPerson: true,
     canOverlap: false,
   };
 
   if (f.priority === "OPCIONAL") {
-    return { ...base, status: "WAITLIST", participatesInScheduling: false };
+    return {
+      ...base,
+      status: "WAITLIST",
+      participatesInScheduling: false,
+    };
   }
 
   if (f.priority === "CRITICA") {
+    // ✅ CAMBIO: Usar dateAndTimeToDateLocal
+    const start = dateAndTimeToDateLocal(f.date, f.timeStart);
+    const end = dateAndTimeToDateLocal(f.date, f.timeEnd);
+
+    debugDateFull('mapEvent CRITICA START', start);
+    debugDateFull('mapEvent CRITICA END', end);
+
     return {
       ...base,
       isFixed: true,
       participatesInScheduling: true,
       transparency: "OPAQUE",
-      start: f.date && f.timeStart ? new Date(`${f.date}T${f.timeStart}:00`) : null,
-      end: f.date && f.timeEnd ? new Date(`${f.date}T${f.timeEnd}:00`) : null,
+      start,
+      end,
     };
   }
 
   // URGENTE / RELEVANTE
+  const start = f.date && f.timeStart
+    ? dateAndTimeToDateLocal(f.date, f.timeStart)
+    : null;
+  const end = f.date && f.timeEnd
+    ? dateAndTimeToDateLocal(f.date, f.timeEnd)
+    : null;
+
+  const windowStart = f.window === "RANGO" && f.windowStart
+    ? dateAndTimeToDateLocal(f.windowStart, "00:00")
+    : null;
+
+  const windowEnd = f.window === "RANGO" && f.windowEnd
+    ? dateAndTimeToDateLocal(f.windowEnd, "23:59")
+    : null;
+
+  debugDateFull('mapEvent URGENTE/RELEVANTE START', start);
+  debugDateFull('mapEvent URGENTE/RELEVANTE END', end);
+
   return {
     ...base,
     isFixed: false,
     participatesInScheduling: true,
     transparency: "OPAQUE",
     window: f.window,
-    windowStart: f.window === "RANGO" && f.windowStart ? new Date(`${f.windowStart}T00:00:00`) : null,
-    windowEnd: f.window === "RANGO" && f.windowEnd ? new Date(`${f.windowEnd}T23:59:59`) : null,
-    start: f.date && f.timeStart ? new Date(`${f.date}T${f.timeStart}:00`) : null,
-    end: f.date && f.timeEnd ? new Date(`${f.date}T${f.timeEnd}:00`) : null,
+    windowStart,
+    windowEnd,
+    start,
+    end,
   };
 }
 
 // Map para RECORDATORIO (solapable, sin solver)
 function mapReminder(f: ReminderForm) {
-  const start =
-    f.date && !f.isAllDay && f.timeStart
-      ? new Date(`${f.date}T${f.timeStart}:00`)
-      : f.date && f.isAllDay
-      ? new Date(`${f.date}T00:00:00`)
-      : null;
+  const start = f.date
+    ? f.isAllDay
+      ? dateAndTimeToDateLocal(f.date, "00:00")
+      : dateAndTimeToDateLocal(f.date, f.timeStart)
+    : null;
 
-  const end =
-    f.isAllDay
-      ? null // el backend coloca 30 min por defecto si no se envía; para allDay te conviene manejarlo como block all-day en front si lo deseas
-      : f.date && f.timeEnd
-      ? new Date(`${f.date}T${f.timeEnd}:00`)
-      : null;
+  const end = f.isAllDay
+    ? null
+    : f.date && f.timeEnd
+    ? dateAndTimeToDateLocal(f.date, f.timeEnd)
+    : null;
+
+  debugDateFull('mapReminder START', start);
+  debugDateFull('mapReminder END', end);
 
   return {
     kind: "RECORDATORIO",
@@ -297,6 +338,22 @@ const Tabs: React.FC<{
 const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any) => void }> = ({ initial, onSubmit }) => {
   const initEvent = useMemo<EventForm>(() => ({ ...defaultEvent(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<EventForm>(initEvent);
+
+  useEffect(() => {
+    if (initial?.date || initial?.timeStart) {
+      console.log('🔍 CrearEvento - Valores iniciales recibidos:', {
+        date: initial.date,
+        timeStart: initial.timeStart,
+        timeEnd: initial.timeEnd,
+        formState: {
+          date: f.date,
+          timeStart: f.timeStart,
+          timeEnd: f.timeEnd,
+        },
+      });
+    }
+  }, [initial?.date, initial?.timeStart, initial?.timeEnd]);
+
 
   const isCritica = f.priority === "CRITICA";
   const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
@@ -431,6 +488,13 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
           Guardar
         </button>
       </div>
+      {process.env.NODE_ENV === 'development' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 font-mono">
+          <div>Fecha: {f.date || '(vacío)'}</div>
+          <div>Hora inicio: {f.timeStart || '(vacío)'}</div>
+          <div>Hora fin: {f.timeEnd || '(vacío)'}</div>
+        </div>
+      )}
     </div>
   );
 };

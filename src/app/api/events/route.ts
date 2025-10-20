@@ -10,6 +10,17 @@ import {
   Event,
 } from '@prisma/client';
 
+function normalizeToUTC(date: Date | null | undefined): Date | null {
+  if (!date) return null;
+  if (!(date instanceof Date)) {
+    // Si viene como string ISO, convertir
+    const d = new Date(date as any);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  // Ya es Date, devolver como-está (la BD lo guardrá en UTC)
+  return isNaN(date.getTime()) ? null : date;
+}
+
 const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
   UI: 'CRITICA',
   UNI: 'URGENTE',
@@ -205,6 +216,23 @@ export async function PATCH(req: Request) {
 
     const data = parsed.data as any;
 
+    // Normalizar fechas
+    if (data.hasOwnProperty('start')) {
+      data.start = normalizeToUTC(data.start);
+    }
+    if (data.hasOwnProperty('end')) {
+      data.end = normalizeToUTC(data.end);
+    }
+    if (data.hasOwnProperty('dueDate')) {
+      data.dueDate = normalizeToUTC(data.dueDate);
+    }
+    if (data.hasOwnProperty('windowStart')) {
+      data.windowStart = normalizeToUTC(data.windowStart);
+    }
+    if (data.hasOwnProperty('windowEnd')) {
+      data.windowEnd = normalizeToUTC(data.windowEnd);
+    }
+
     if (data.priority) {
       const policy = priorityPolicy(data.priority);
       data.participatesInScheduling = policy.participatesInScheduling;
@@ -225,7 +253,6 @@ export async function PATCH(req: Request) {
       }
     }
 
-    // Normaliza nullables a undefined para Prisma si no se quiere tocar
     const updated = await prisma.event.update({
       where: { id },
       data: {
@@ -782,6 +809,7 @@ const EventCreateSchema_EVENTO = z.object({
   calendarId: z.string().nullish(),
 });
 
+
 const EventCreateSchema_TAREA = z.object({
   kind: z.literal('TAREA'),
   title: z.string().trim().min(1),
@@ -796,10 +824,108 @@ const EventCreateSchema_TAREA = z.object({
   calendarId: z.string().nullish(),
 });
 
+// Agregar después de EventCreateSchema_TAREA y antes de EventCreateSchema
+
+const EventCreateSchema_RECORDATORIO = z.object({
+  kind: z.literal('RECORDATORIO'),
+  title: z.string().trim().min(1),
+  description: z.string().trim().nullish(),
+  category: z.string().nullish(),
+
+  repeat: z.nativeEnum(RepeatRule).default('NONE'),
+  isAllDay: z.boolean().default(false),
+  start: zDate,      // fecha opcional para recordatorios
+  end: zDate,        // hora fin opcional
+  calendarId: z.string().nullish(),
+});
+
+// Modificar EventCreateSchema para incluir RECORDATORIO:
 const EventCreateSchema = z.discriminatedUnion('kind', [
   EventCreateSchema_EVENTO,
   EventCreateSchema_TAREA,
+  EventCreateSchema_RECORDATORIO,  // ← Agregar esta línea
 ]);
+
+/** ============== creación series RECORDATORIO ============== */
+async function createReminderSeries(userId: string, data: z.infer<typeof EventCreateSchema_RECORDATORIO>) {
+  const normalizedStart = data.start ? normalizeToUTC(data.start) : null;
+  const normalizedEnd = data.end ? normalizeToUTC(data.end) : null;
+
+  const needsSeries = data.repeat !== 'NONE';
+  if (needsSeries && !normalizedStart) {
+    throw new Error('Para repetir un recordatorio debes proporcionar una fecha de inicio.');
+  }
+
+  const baseStart = normalizedStart ?? null;
+  const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [{ start: null as any, end: null }];
+
+  const master = await prisma.event.create({
+    data: {
+      userId,
+      calendarId: data.calendarId ?? null,
+      kind: 'RECORDATORIO',
+      title: data.title,
+      description: data.description ?? null,
+      category: data.category ?? null,
+
+      start: series[0].start ?? null,
+      end: series[0].end ?? null,
+      isAllDay: data.isAllDay,
+
+      repeat: data.repeat,
+      rrule:
+        needsSeries && normalizedStart
+          ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${normalizedStart.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
+          : null,
+
+      priority: 'OPCIONAL',
+      window: 'NONE',
+      isFixed: false,
+      isInPerson: false,
+      canOverlap: true,
+      participatesInScheduling: false,
+
+      status: 'SCHEDULED',
+      tzid: 'UTC',  // Siempre UTC
+    },
+  });
+
+  if (!needsSeries || series.length === 1) return [master];
+
+  const tx = series.slice(1).map(({ start, end }) =>
+    prisma.event.create({
+      data: {
+        userId,
+        calendarId: data.calendarId ?? null,
+        kind: 'RECORDATORIO',
+        title: data.title,
+        description: data.description ?? null,
+        category: data.category ?? null,
+
+        start,
+        end,
+        isAllDay: data.isAllDay,
+
+        repeat: 'NONE',
+        rrule: null,
+        originEventId: master.id,
+
+        priority: 'OPCIONAL',
+        window: 'NONE',
+        isFixed: false,
+        isInPerson: false,
+        canOverlap: true,
+        participatesInScheduling: false,
+
+        status: 'SCHEDULED',
+        tzid: 'UTC',
+      },
+    })
+  );
+
+  const children = await prisma.$transaction(tx);
+  return [master, ...children];
+}
 
 type EventCreatePayload = z.infer<typeof EventCreateSchema_EVENTO>;
 
@@ -836,17 +962,18 @@ function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreate
 
 /** ============== creación series EVENTO ============== */
 async function createEventSeries(userId: string, data: z.infer<typeof EventCreateSchema_EVENTO>) {
-  const normalizedStart = data.start && !isUnsetDate(data.start) ? data.start : null;
-  const normalizedEnd = data.end && !isUnsetDate(data.end) ? data.end : null;
-  const normalizedWindowStart = data.windowStart && !isUnsetDate(data.windowStart) ? data.windowStart : null;
-  const normalizedWindowEnd = data.windowEnd && !isUnsetDate(data.windowEnd) ? data.windowEnd : null;
+  // Normalizar TODAS las fechas a UTC
+  const normalizedStart = data.start ? normalizeToUTC(data.start) : null;
+  const normalizedEnd = data.end ? normalizeToUTC(data.end) : null;
+  const normalizedWindowStart = data.windowStart ? normalizeToUTC(data.windowStart) : null;
+  const normalizedWindowEnd = data.windowEnd ? normalizeToUTC(data.windowEnd) : null;
 
   const needsSeries = data.repeat !== 'NONE';
   if (needsSeries && !normalizedStart) {
     throw new Error('Para repetir un evento debes proporcionar fecha y hora de inicio (start).');
   }
 
-  // RRULE opcional en el master (informativo)
+  // RRULE usando UTC
   const rrule =
     needsSeries && normalizedStart
       ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${normalizedStart.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
@@ -855,7 +982,6 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
   const baseStart = normalizedStart ?? null;
   const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [{ start: null as any, end: null }];
 
-  // Crea master = primera ocurrencia
   const master = await prisma.event.create({
     data: {
       userId,
@@ -884,7 +1010,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       transparency: (data.transparency as any) ?? null,
       status: data.status ?? 'SCHEDULED',
 
-      tzid: 'UTC',
+      tzid: 'UTC',  // Siempre UTC
       isAllDay: false,
     },
   });
@@ -1043,9 +1169,15 @@ export async function POST(req: Request) {
       const refreshed = await prisma.event.findMany({ where: { id: { in: createdIds } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
-    } else {
+    } else if (data.kind === 'TAREA') {
       items = await createTaskSeries(user.id, data);
+    } else if (data.kind === 'RECORDATORIO') {
+      // ← Agregar manejo para RECORDATORIO
+      items = await createReminderSeries(user.id, data);
+    } else {
+      throw new Error('Invalid event kind');
     }
+    
     return NextResponse.json({ count: items.length, items }, { status: 201 });
   } catch (e: any) {
     console.error('POST /api/events error', e);
@@ -1069,7 +1201,23 @@ export async function GET(req: Request) {
       orderBy: [{ start: 'asc' }, { createdAt: 'desc' }],
       take: 5000,
     });
-    return NextResponse.json(rows);
+
+    // ✅ GARANTIZAR que todas las fechas sean ISO strings
+    const normalized = rows.map((event) => ({
+      ...event,
+      start: event.start ? event.start.toISOString() : null,
+      end: event.end ? event.end.toISOString() : null,
+      dueDate: event.dueDate ? event.dueDate.toISOString() : null,
+      windowStart: event.windowStart ? event.windowStart.toISOString() : null,
+      windowEnd: event.windowEnd ? event.windowEnd.toISOString() : null,
+      createdAt: event.createdAt.toISOString(),
+      updatedAt: event.updatedAt.toISOString(),
+      lastModified: event.lastModified ? event.lastModified.toISOString() : null,
+      createdIcal: event.createdIcal ? event.createdIcal.toISOString() : null,
+      completedAt: event.completedAt ? event.completedAt.toISOString() : null,
+    }));
+
+    return NextResponse.json(normalized);
   } catch (e) {
     console.error('GET /api/events error', e);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
