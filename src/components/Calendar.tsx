@@ -17,6 +17,7 @@ import { THEMES, currentTheme } from '@/theme/themes';
 import {
   dateToDateStringLocal,
   dateToTimeStringLocal,
+  debugDateFull,
   isoToDate,
   resolveBrowserTimezone,
 } from '@/lib/timezone';
@@ -74,7 +75,19 @@ type ModalInitialReminder = {
   timeEnd: string;
 };
 
-type ModalInitial = ModalInitialEvent | ModalInitialReminder;
+type ModalInitialReminder = {
+  kind: 'RECORDATORIO';
+  title: string;
+  description: string;
+  category: string;
+  repeat: 'NONE';
+  isAllDay: boolean;
+  date: string;
+  timeStart: string;
+  timeEnd: string;
+};
+
+type ModalInitial = ModalInitialEvent | ModalInitialTask | ModalInitialReminder;
 
 export default function Calendar({ onViewChange }: CalendarProps) {
   // === tema (escucha cambios emitidos por la página) ===
@@ -208,8 +221,23 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }
 
 function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | null {
+  // Si es TAREA
   if (row.kind === 'TAREA') {
     return null;
+  }
+
+  if (row.kind === 'RECORDATORIO' || row.priority === 'RECORDATORIO') {
+    const startDate = row.start ? isoToDate(row.start) : null;
+    const endDate = row.end ? isoToDate(row.end) : null;
+
+    return {
+      kind: 'RECORDATORIO',
+      title: row.title,
+      description: row.description ?? '',
+      category: row.category ?? '',
+      repeat: 'NONE',
+      dueDate: dateToDateStringLocal(dueDate, timeZone),
+    };
   }
 
   if (row.kind === 'RECORDATORIO' || row.priority === 'RECORDATORIO') {
@@ -232,6 +260,10 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   // Si es EVENTO
   const startDate = row.start ? isoToDate(row.start) : null;
   const endDate = row.end ? isoToDate(row.end) : null;
+
+  // ✅ DEBUG
+  debugDateFull('START en mapRowToEditInitial', startDate, timeZone);
+  debugDateFull('END en mapRowToEditInitial', endDate, timeZone);
 
   return {
     kind: 'EVENTO',
@@ -547,12 +579,8 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
           setOpenPreview(false);
           setEditingId(e.id);
           const initial = mapRowToEditInitial(e, browserTimeZone);
-          if (!initial) {
-            alert('Este tipo de elemento no se puede editar desde aquí todavía.');
-            return;
-          }
           setEditInitial(initial);
-          if (initial.kind === 'RECORDATORIO') {
+          if (initial?.kind === 'RECORDATORIO') {
             setEditTab('recordatorio');
           } else {
             setEditTab('evento');

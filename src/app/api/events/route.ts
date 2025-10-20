@@ -18,7 +18,6 @@ const PRIORITY_ALIAS_MAP: Record<string, Priority> = {
   UNI: 'URGENTE',
   INU: 'RELEVANTE',
   NN: 'OPCIONAL',
-  RECORDATORIO: REMINDER_PRIORITY,
   REMINDER: REMINDER_PRIORITY,
   REMINDERS: REMINDER_PRIORITY,
   RECORDATORIOS: REMINDER_PRIORITY,
@@ -117,7 +116,7 @@ const PrioritySchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid priority' });
       return z.NEVER;
     }
-    return normalized === REMINDER_PRIORITY
+    return normalized === 'RECORDATORIO'
       ? (REMINDER_PRIORITY as Priority)
       : (normalized as Priority);
   });
