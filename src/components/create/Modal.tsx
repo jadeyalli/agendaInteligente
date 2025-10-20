@@ -7,7 +7,6 @@ import {
   Type as TypeIcon,
   FolderOpen,
   FileText,
-  MapPin,
   Flag,
   Calendar,
   Clock,
@@ -15,23 +14,25 @@ import {
   CalendarRange,
   Link as LinkIcon,
 } from "lucide-react";
+import {
+  dateAndTimeToDateLocal,
+  dateStringToEndOfDay,
+  dateStringToStartOfDay,
+  resolveBrowserTimezone,
+} from "@/lib/timezone";
 
 /** =========================================================
  * CreateEditModal
  * ========================================================= */
 
-type Priority = "CRITICA" | "URGENTE" | "RELEVANTE" | "OPCIONAL";
+type Priority = "CRITICA" | "URGENTE" | "RELEVANTE" | "OPCIONAL" | "RECORDATORIO";
 type RepeatRule = "NONE" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 type AvailabilityWindow = "NONE" | "PRONTO" | "SEMANA" | "MES" | "RANGO";
-type Kind = "EVENTO" | "TAREA" | "SOLICITUD";
-
 type EventForm = {
   kind: "EVENTO";
   title: string;
   description?: string;
   category?: string;
-  isInPerson: boolean;
-  canOverlap: boolean;
   priority: Priority;
   repeat: RepeatRule;
   window: AvailabilityWindow;
@@ -65,13 +66,50 @@ type RequestForm = {
   timeEnd?: string;
 };
 
+type EventSubmitPayload = {
+  kind: "EVENTO";
+  title: string;
+  description: string | null;
+  category: string | null;
+  priority: Priority;
+  repeat: RepeatRule;
+  window: AvailabilityWindow;
+  windowStart: Date | null;
+  windowEnd: Date | null;
+  start: Date | null;
+  end: Date | null;
+  isAllDay: boolean;
+  participatesInScheduling: boolean;
+  isFixed: boolean;
+  status: "SCHEDULED" | "WAITLIST";
+  tzid: string;
+  calendarId?: string | null;
+};
+
+type RequestSubmitPayload = {
+  kind: "SOLICITUD";
+  title: string;
+  description: string | null;
+  category: string | null;
+  shareLink: string;
+  window: AvailabilityWindow;
+  windowStart: Date | null;
+  windowEnd: Date | null;
+  start: Date | null;
+  end: Date | null;
+  participatesInScheduling: boolean;
+  tzid: string;
+};
+
+export type CreateModalSubmitPayload = EventSubmitPayload | RequestSubmitPayload;
+
 type Props = {
   open: boolean;
   mode?: "create" | "edit";
   initialTab?: "evento" | "solicitud";
-  initialValues?: Partial<EventForm & TaskForm & RequestForm>;
+  initialValues?: Partial<EventForm | TaskForm | RequestForm>;
   title?: string;
-  onSubmit: (payload: any) => void;
+  onSubmit: (payload: CreateModalSubmitPayload) => void;
   onClose: () => void;
 };
 
@@ -194,8 +232,6 @@ const defaultEvent = (): EventForm => ({
   title: "",
   description: "",
   category: "",
-  isInPerson: true,
-  canOverlap: false,
   priority: "RELEVANTE",
   repeat: "NONE",
   window: "NONE",
@@ -204,14 +240,6 @@ const defaultEvent = (): EventForm => ({
   date: "",
   timeStart: "",
   timeEnd: "",
-});
-const defaultTask = (): TaskForm => ({
-  kind: "TAREA",
-  title: "",
-  description: "",
-  category: "",
-  repeat: "NONE",
-  dueDate: "",
 });
 const defaultRequest = (): RequestForm => ({
   kind: "SOLICITUD",
@@ -228,49 +256,66 @@ const defaultRequest = (): RequestForm => ({
 });
 
 // “Map a Prisma-like payload”
-function mapEvent(f: EventForm) {
-  const base: any = {
+function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
+  const startAt = dateAndTimeToDateLocal(f.date, f.timeStart, timeZone);
+  const endAt = dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone);
+  const windowStartAt = f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null;
+  const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null;
+  const isAllDay = Boolean(f.date && !f.timeStart && !f.timeEnd);
+
+  const base: EventSubmitPayload = {
     kind: "EVENTO",
     title: f.title.trim(),
     description: f.description?.trim() || null,
     category: f.category || null,
-    isInPerson: f.isInPerson,
-    canOverlap: f.isInPerson ? f.canOverlap : true,
     priority: f.priority,
     repeat: f.repeat,
-  };
-
-  if (f.priority === "OPCIONAL") {
-    return { ...base, status: "WAITLIST", participatesInScheduling: false };
-  }
-
-  if (f.priority === "CRITICA") {
-    return {
-      ...base,
-      isFixed: true,
-      participatesInScheduling: true,
-      transparency: "OPAQUE",
-      start: f.date && f.timeStart ? new Date(`${f.date}T${f.timeStart}:00`) : null,
-      end: f.date && f.timeEnd ? new Date(`${f.date}T${f.timeEnd}:00`) : null,
-    };
-  }
-
-  // URGENTE / RELEVANTE
-  return {
-    ...base,
-    isFixed: false,
-    participatesInScheduling: true,
-    transparency: "OPAQUE",
     window: f.window,
-    windowStart: f.window === "RANGO" && f.windowStart ? new Date(`${f.windowStart}T00:00:00`) : null,
-    windowEnd: f.window === "RANGO" && f.windowEnd ? new Date(`${f.windowEnd}T23:59:59`) : null,
-    start: f.date && f.timeStart ? new Date(`${f.date}T${f.timeStart}:00`) : null,
-    end: f.date && f.timeEnd ? new Date(`${f.date}T${f.timeEnd}:00`) : null,
+    windowStart: windowStartAt,
+    windowEnd: windowEndAt,
+    isAllDay,
+    start: startAt,
+    end: endAt,
+    participatesInScheduling: true,
+    isFixed: false,
+    status: "SCHEDULED",
+    tzid: timeZone,
   };
+
+  switch (f.priority) {
+    case "RECORDATORIO":
+      return {
+        ...base,
+        participatesInScheduling: false,
+        status: "SCHEDULED",
+        window: "NONE",
+        windowStart: null,
+        windowEnd: null,
+      };
+    case "OPCIONAL": {
+      return {
+        ...base,
+        status: "WAITLIST",
+        participatesInScheduling: false,
+        window: "NONE",
+        windowStart: null,
+        windowEnd: null,
+        start: null,
+        end: null,
+      };
+    }
+    case "CRITICA":
+      return {
+        ...base,
+        isFixed: true,
+      };
+    default:
+      return base;
+  }
 }
 
 
-function mapRequest(f: RequestForm) {
+function mapRequest(f: RequestForm, timeZone: string): RequestSubmitPayload {
   return {
     kind: "SOLICITUD",
     title: f.title.trim(),
@@ -278,19 +323,22 @@ function mapRequest(f: RequestForm) {
     category: f.category || null,
     shareLink: f.shareLink,
     window: f.window,
-    windowStart: f.window === "RANGO" && f.windowStart ? new Date(`${f.windowStart}T00:00:00`) : null,
-    windowEnd: f.window === "RANGO" && f.windowEnd ? new Date(`${f.windowEnd}T23:59:59`) : null,
-    start: f.date && f.timeStart ? new Date(`${f.date}T${f.timeStart}:00`) : null,
-    end: f.date && f.timeEnd ? new Date(`${f.date}T${f.timeEnd}:00`) : null,
+    windowStart: f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null,
+    windowEnd: f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null,
+    start: dateAndTimeToDateLocal(f.date, f.timeStart, timeZone),
+    end: dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone),
     participatesInScheduling: true,
+    tzid: timeZone,
   };
 }
 
 /* ------------------------- formularios --------------------------- */
+type TabId = "evento" | "solicitud";
+
 const Tabs: React.FC<{
-  tabs: { id: string; label: string }[];
-  value: string;
-  onChange: (v: string) => void;
+  tabs: { id: TabId; label: string }[];
+  value: TabId;
+  onChange: (v: TabId) => void;
 }> = ({ tabs, value, onChange }) => (
   <div className="mb-4 flex gap-2">
     {tabs.map((t) => (
@@ -309,13 +357,22 @@ const Tabs: React.FC<{
   </div>
 );
 
-const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any) => void }> = ({ initial, onSubmit }) => {
+const CrearEvento: React.FC<{
+  initial?: Partial<EventForm>;
+  onSubmit: (data: EventSubmitPayload) => void;
+  timeZone: string;
+}> = ({
+  initial,
+  onSubmit,
+  timeZone,
+}) => {
   const initEvent = useMemo<EventForm>(() => ({ ...defaultEvent(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<EventForm>(initEvent);
 
   const isCritica = f.priority === "CRITICA";
   const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
   const isOpcional = f.priority === "OPCIONAL";
+  const isReminder = f.priority === "RECORDATORIO";
   const canSubmit = f.title.trim().length > 0 && (!isCritica || (f.date && f.timeStart && f.timeEnd));
 
   return (
@@ -339,37 +396,13 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
       </Field>
 
       <Row>
-        <Field label="Presencialidad" labelIcon={<MapPin className="h-4 w-4" />} hint="Solo uno puede estar activo.">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className={classNames(
-                "inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium transition",
-                f.isInPerson ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-800 border-slate-300 hover:bg-slate-50"
-              )}
-              onClick={() => set({ ...f, isInPerson: true, canOverlap: false })}
-            >
-              Presencial
-            </button>
-            <button
-              type="button"
-              className={classNames(
-                "inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-medium transition",
-                !f.isInPerson ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-800 border-slate-300 hover:bg-slate-50"
-              )}
-              onClick={() => set({ ...f, isInPerson: false, canOverlap: true })}
-            >
-              No presencial
-            </button>
-          </div>
-        </Field>
-
         <Field label="Prioridad" labelIcon={<Flag className="h-4 w-4" />}>
           <Select value={f.priority} onChange={(e) => set({ ...f, priority: e.target.value as Priority })}>
             <option value="CRITICA">Crítica</option>
             <option value="URGENTE">Urgente</option>
             <option value="RELEVANTE">Relevante</option>
             <option value="OPCIONAL">Opcional</option>
+            <option value="RECORDATORIO">Recordatorio</option>
           </Select>
         </Field>
       </Row>
@@ -453,6 +486,35 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         </>
       )}
 
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
       {isOpcional && <p className={subtle}>Este elemento irá a la lista de espera y no requiere fecha u hora.</p>}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -462,7 +524,7 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         <button
           className={classNames(primary, !canSubmit && "opacity-50 cursor-not-allowed")}
           disabled={!canSubmit}
-          onClick={() => onSubmit(mapEvent(f))}
+          onClick={() => onSubmit(mapEvent(f, timeZone))}
           type="button"
         >
           Guardar
@@ -473,7 +535,15 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
 };
 
 
-const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data: any) => void }> = ({ initial, onSubmit }) => {
+const CrearSolicitud: React.FC<{
+  initial?: Partial<RequestForm>;
+  onSubmit: (data: RequestSubmitPayload) => void;
+  timeZone: string;
+}> = ({
+  initial,
+  onSubmit,
+  timeZone,
+}) => {
   const initRequest = useMemo<RequestForm>(() => ({ ...defaultRequest(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<RequestForm>(initRequest);
   const canSubmit = f.title.trim().length > 0 && f.shareLink.trim().length > 0;
@@ -540,7 +610,7 @@ const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data
         <button
           className={classNames(primary, !canSubmit && "opacity-50 cursor-not-allowed")}
           disabled={!canSubmit}
-          onClick={() => onSubmit(mapRequest(f))}
+          onClick={() => onSubmit(mapRequest(f, timeZone))}
           type="button"
         >
           Guardar
@@ -560,8 +630,9 @@ export default function CreateEditModal({
   onSubmit,
   onClose,
 }: Props) {
-  const [tab, setTab] = useState<"evento" | "solicitud">(initialTab);
+  const [tab, setTab] = useState<TabId>(initialTab);
   const derivedTitle = title ?? (mode === "edit" ? "Editar" : "Crear");
+  const timeZone = useMemo(() => resolveBrowserTimezone(), []);
 
   return (
     <ModalShell open={open} onClose={onClose} title={derivedTitle}>
@@ -572,20 +643,22 @@ export default function CreateEditModal({
           { id: "solicitud", label: "Solicitud de disponibilidad" },
         ]}
         value={tab}
-        onChange={(v) => setTab(v as any)}
+        onChange={(v) => setTab(v)}
       />
 
       {tab === "evento" && (
         <CrearEvento
-          initial={{ kind: "EVENTO", ...(initialValues ?? {}) }}
+          initial={{ ...(initialValues ?? {}), kind: "EVENTO" }}
           onSubmit={onSubmit}
+          timeZone={timeZone}
         />
       )}
 
       {tab === "solicitud" && (
         <CrearSolicitud
-          initial={{ kind: "SOLICITUD", ...(initialValues ?? {}) }}
+          initial={{ ...(initialValues ?? {}), kind: "SOLICITUD" }}
           onSubmit={onSubmit}
+          timeZone={timeZone}
         />
       )}
     </ModalShell>

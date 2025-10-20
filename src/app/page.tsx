@@ -1,6 +1,6 @@
 'use client';
 import './globals.css';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {
@@ -13,7 +13,7 @@ import {
   Palette,
 } from 'lucide-react';
 
-import { THEMES, type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
+import { type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
 
 /** Tipos que recibiremos desde el calendario */
 type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
@@ -45,7 +45,7 @@ export default function DashboardHomePage() {
   useEffect(() => { applyTheme(theme); }, [theme]);
 
   // Meta del calendario (para tarjetas)
-  const [calMeta, setCalMeta] = useState<CalendarMeta>({
+  const [, setCalMeta] = useState<CalendarMeta>({
     view: 'timeGridWeek',
     title: '',
     start: new Date(),
@@ -59,21 +59,6 @@ export default function DashboardHomePage() {
         ? 'bg-slate-900 text-white'
         : 'text-slate-700 hover:bg-slate-100',
     ].join(' ');
-
-  const scopeWord = useMemo(() => {
-    switch (calMeta.view) {
-      case 'timeGridDay':
-        return 'Hoy';
-      case 'timeGridWeek':
-        return 'Esta semana';
-      case 'dayGridMonth':
-        return 'Este mes';
-      case 'multiMonthYear':
-        return 'Este año';
-      default:
-        return '';
-    }
-  }, [calMeta.view]);
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
@@ -178,24 +163,7 @@ export default function DashboardHomePage() {
 
           {/* Main */}
           <main className="mx-auto w-full max-w-7xl grow px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
-            <section className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4">
-                <p className="text-xs text-[var(--muted)]">{scopeWord} eventos programados</p>
-                <p className="mt-1 text-2xl font-semibold">0</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4">
-                <p className="text-xs text-[var(--muted)]">{scopeWord} tareas</p>
-                <p className="mt-1 text-2xl font-semibold">0</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-4">
-                <p className="text-xs text-[var(--muted)]">Productividad</p>
-                <p className="mt-1 text-2xl font-semibold">—</p>
-              </div>
-            </section>
-
-            <section>
-              <Calendar onViewChange={(meta) => setCalMeta(meta)} />
-            </section>
+            <Calendar onViewChange={(meta) => setCalMeta(meta)} />
           </main>
 
           {/* Footer */}

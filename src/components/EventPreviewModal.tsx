@@ -10,7 +10,7 @@ export type EventRow = {
   title: string;
   description?: string | null;
   category?: string | null;
-  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | null;
+  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO' | null;
 
   start?: string | null;
   end?: string | null;
@@ -18,14 +18,12 @@ export type EventRow = {
   dueDate?: string | null;
 };
 
-const badgeByPriority: Record<
-  NonNullable<EventRow['priority']>,
-  string
-> = {
+const badgeByPriority: Record<NonNullable<EventRow['priority']>, string> = {
   CRITICA: 'bg-rose-600 text-white',
   URGENTE: 'bg-amber-500 text-black',
   RELEVANTE: 'bg-blue-600 text-white',
   OPCIONAL: 'bg-slate-500 text-white',
+  RECORDATORIO: 'bg-violet-500 text-white',
 };
 
 function fmtDateTime(d?: string | null) {
