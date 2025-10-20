@@ -13,7 +13,7 @@ import {
   Palette,
 } from 'lucide-react';
 
-import { THEMES, type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
+import { type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
 
 /** Tipos que recibiremos desde el calendario */
 type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';

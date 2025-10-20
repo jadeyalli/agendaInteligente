@@ -54,13 +54,51 @@ type ReminderForm = {
   timeEnd?: string;    // optional
 };
 
+type EventSubmitPayload = {
+  kind: "EVENTO";
+  title: string;
+  description: string | null;
+  category: string | null;
+  priority: Priority;
+  repeat: RepeatRule;
+  window: AvailabilityWindow;
+  windowStart: Date | null;
+  windowEnd: Date | null;
+  start: Date | null;
+  end: Date | null;
+  isAllDay: boolean;
+  participatesInScheduling: boolean;
+  isFixed: boolean;
+  transparency: "OPAQUE" | "TRANSPARENT" | null;
+  status: "SCHEDULED" | "WAITLIST";
+  tzid: string;
+  calendarId?: string | null;
+};
+
+type RequestSubmitPayload = {
+  kind: "SOLICITUD";
+  title: string;
+  description: string | null;
+  category: string | null;
+  shareLink: string;
+  window: AvailabilityWindow;
+  windowStart: Date | null;
+  windowEnd: Date | null;
+  start: Date | null;
+  end: Date | null;
+  participatesInScheduling: boolean;
+  tzid: string;
+};
+
+export type CreateModalSubmitPayload = EventSubmitPayload | RequestSubmitPayload;
+
 type Props = {
   open: boolean;
   mode?: "create" | "edit";
   initialTab?: "evento" | "recordatorio";
   initialValues?: Partial<EventForm & ReminderForm>;
   title?: string;
-  onSubmit: (payload: any) => void;
+  onSubmit: (payload: CreateModalSubmitPayload) => void;
   onClose: () => void;
 };
 
@@ -297,10 +335,12 @@ function mapRequest(f: RequestForm, timeZone: string) {
 }
 
 /* ------------------------- formularios --------------------------- */
+type TabId = "evento" | "solicitud";
+
 const Tabs: React.FC<{
-  tabs: { id: string; label: string }[];
-  value: string;
-  onChange: (v: string) => void;
+  tabs: { id: TabId; label: string }[];
+  value: TabId;
+  onChange: (v: TabId) => void;
 }> = ({ tabs, value, onChange }) => (
   <div className="mb-4 flex gap-2">
     {tabs.map((t) => (
@@ -550,6 +590,35 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         </>
       )}
 
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
       {isOpcional && <p className={subtle}>Este elemento irá a la lista de espera y no requiere fecha u hora.</p>}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -692,7 +761,7 @@ export default function CreateEditModal({
           { id: "recordatorio", label: mode === "edit" ? "Editar Recordatorio" : "Crear Recordatorio" },
         ]}
         value={tab}
-        onChange={(v) => setTab(v as any)}
+        onChange={(v) => setTab(v)}
       />
 
       {tab === "evento" && (

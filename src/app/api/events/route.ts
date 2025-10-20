@@ -197,6 +197,8 @@ const PatchSchema = z.object({
   windowEnd: z.union([z.coerce.date(), z.null()]).optional(),
 });
 
+type PatchPayload = z.infer<typeof PatchSchema>;
+
 export async function PATCH(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -210,7 +212,29 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: 'Invalid payload', issues: parsed.error.flatten() }, { status: 400 });
     }
 
-    const data = parsed.data as any;
+    const data: PatchPayload = { ...parsed.data };
+
+    if (data.priority) {
+      const policy = priorityPolicy(data.priority);
+      data.participatesInScheduling = policy.participatesInScheduling;
+      data.isFixed = policy.isFixed;
+
+      if (data.priority === 'RECORDATORIO') {
+        data.status = data.status ?? 'SCHEDULED';
+        data.window = 'NONE';
+        data.windowStart = null;
+        data.windowEnd = null;
+      } else if (policy.status === 'WAITLIST') {
+        data.status = 'WAITLIST';
+        data.start = null;
+        data.end = null;
+        data.window = 'NONE';
+        data.windowStart = null;
+        data.windowEnd = null;
+      } else {
+        data.status = data.status ?? 'SCHEDULED';
+      }
+    }
 
     if (data.priority) {
       const policy = priorityPolicy(data.priority);
@@ -898,8 +922,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       repeat: data.repeat,
       rrule,
 
-      start: series[0].start ?? null,
-      end: series[0].end ?? null,
+      start: firstStart,
+      end: firstEnd,
 
       window: data.window,
       windowStart: normalizedWindowStart,
@@ -907,7 +931,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
 
       isFixed: data.isFixed ?? false,
       participatesInScheduling: data.participatesInScheduling ?? true,
-      transparency: (data.transparency as any) ?? null,
+      transparency: data.transparency ?? null,
       status: data.status ?? 'SCHEDULED',
 
       tzid,
@@ -915,7 +939,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
     },
   });
 
-  if (!needsSeries || series.length === 1) return [master];
+  if (!needsSeries || series.length <= 1) return [master];
 
   // Instancias hijas planas (repeat = NONE)
   const tx = series.slice(1).map(({ start, end }) =>
@@ -945,7 +969,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
 
         isFixed: data.isFixed ?? false,
         participatesInScheduling: data.participatesInScheduling ?? true,
-        transparency: (data.transparency as any) ?? null,
+        transparency: data.transparency ?? null,
         status: data.status ?? 'SCHEDULED',
 
         tzid,
@@ -966,7 +990,8 @@ async function createTaskSeries(userId: string, data: z.infer<typeof EventCreate
   }
 
   const baseDue = data.dueDate ?? null;
-  const durationlessSeries = baseDue ? buildSeries(baseDue, null, data.repeat) : [{ start: null as any, end: null }];
+  const durationlessSeries = baseDue ? buildSeries(baseDue, null, data.repeat) : [];
+  const firstDue = durationlessSeries.length ? durationlessSeries[0].start : null;
 
   const master = await prisma.event.create({
     data: {
@@ -977,7 +1002,7 @@ async function createTaskSeries(userId: string, data: z.infer<typeof EventCreate
       description: data.description ?? null,
       category: data.category ?? null,
 
-      dueDate: durationlessSeries[0].start ?? null,
+      dueDate: firstDue,
       todoStatus: data.todoStatus ?? 'NEEDS_ACTION',
       completed: false,
       percentComplete: 0,
@@ -1004,7 +1029,7 @@ async function createTaskSeries(userId: string, data: z.infer<typeof EventCreate
     },
   });
 
-  if (!needsSeries || durationlessSeries.length === 1) return [master];
+  if (!needsSeries || durationlessSeries.length <= 1) return [master];
 
   const tx = durationlessSeries.slice(1).map(({ start }) =>
     prisma.event.create({
@@ -1079,9 +1104,10 @@ export async function POST(req: Request) {
     }
     
     return NextResponse.json({ count: items.length, items }, { status: 201 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('POST /api/events error', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    const message = e instanceof Error ? e.message : 'Server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -1090,7 +1116,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const scope = searchParams.get('scope') ?? 'user';
 
-    const where: any = {};
+    const where: Prisma.EventWhereInput = {};
     if (scope === 'user') {
       const demo = await prisma.user.findUnique({ where: { email: 'demo@local' } });
       if (demo) where.userId = demo.id;
@@ -1120,6 +1146,7 @@ export async function GET(req: Request) {
     return NextResponse.json(normalized);
   } catch (e) {
     console.error('GET /api/events error', e);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    const message = e instanceof Error ? e.message : 'Server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

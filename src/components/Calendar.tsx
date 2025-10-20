@@ -8,7 +8,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
-import CreateEditModal from '@/components/create/Modal';
+import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
 
@@ -24,6 +24,8 @@ import {
 export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
 export type CalendarMeta = { view: ViewId; title: string; start: Date; end: Date };
 export type CalendarProps = { onViewChange?: (meta: CalendarMeta) => void };
+
+type PriorityCode = 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
 
 type EventRow = {
   id: string;
@@ -47,13 +49,37 @@ type EventRow = {
   windowEnd?: string | null;
 };
 
+type ModalInitialEvent = {
+  kind: 'EVENTO';
+  title: string;
+  description: string;
+  category: string;
+  priority: PriorityCode;
+  repeat: 'NONE';
+  window: 'NONE';
+  date: string;
+  timeStart: string;
+  timeEnd: string;
+};
+
+type ModalInitialTask = {
+  kind: 'TAREA';
+  title: string;
+  description: string;
+  category: string;
+  repeat: 'NONE';
+  dueDate: string;
+};
+
+type ModalInitial = ModalInitialEvent | ModalInitialTask;
+
 export default function Calendar({ onViewChange }: CalendarProps) {
   // === tema (escucha cambios emitidos por la página) ===
   const [theme, setTheme] = useState(currentTheme());
   useEffect(() => {
     const onChange = () => setTheme(currentTheme());
-    window.addEventListener('ai-theme-change', onChange as any);
-    return () => window.removeEventListener('ai-theme-change', onChange as any);
+    window.addEventListener('ai-theme-change', onChange);
+    return () => window.removeEventListener('ai-theme-change', onChange);
   }, []);
 
   // === estado calendario ===
@@ -65,7 +91,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [creating, setCreating] = useState(false);
 
   const [openEdit, setOpenEdit] = useState(false);
-  const [editInitial, setEditInitial] = useState<any>(null);
+  const [editInitial, setEditInitial] = useState<ModalInitial | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [openImport, setOpenImport] = useState(false);
@@ -89,7 +115,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   // helper: YYYY-MM-DD
   const toDateOnly = (d: string | Date | null | undefined) => {
     if (!d) return null;
-    const s = typeof d === 'string' ? d : (d as Date).toISOString();
+    const s = typeof d === 'string' ? d : d.toISOString();
     return s.slice(0, 10);
   };
 
@@ -111,7 +137,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   useEffect(() => { loadEvents(); }, []);
 
   // ====== Crear desde el modal ======
-  async function handleCreateFromModal(payload: any) {
+  async function handleCreateFromModal(payload: CreateModalSubmitPayload) {
     try {
       setCreating(true);
       const res = await fetch('/api/events', {
@@ -123,15 +149,16 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       }
       setOpenCreate(false);
       await loadEvents();
-    } catch (e: any) {
-      alert(e.message || 'Error al crear');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al crear';
+      alert(message);
     } finally {
       setCreating(false);
     }
   }
 
   // ====== Editar desde el modal ======
-  async function handleEditFromModal(payload: any) {
+  async function handleEditFromModal(payload: CreateModalSubmitPayload) {
     if (!editingId) return;
     try {
       setCreating(true);
@@ -147,8 +174,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setOpenEdit(false);
       setEditingId(null);
       await loadEvents();
-    } catch (e: any) {
-      alert(e.message || 'Error al actualizar');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al actualizar';
+      alert(message);
     } finally {
       setCreating(false);
     }
@@ -166,8 +194,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setOpenPreview(false);
       setSelected(null);
       await loadEvents();
-    } catch (err: any) {
-      alert(err.message || 'Error al eliminar');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error al eliminar';
+      alert(message);
     } finally {
       setDeleting(false);
     }
@@ -211,9 +240,9 @@ function mapRowToEditInitial(row: EventRow) {
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======
-  const fcEvents = useMemo(() => {
+  const fcEvents = useMemo<EventInput[]>(() => {
     if (!rows.length) return [];
-    const out: any[] = [];
+    const out: EventInput[] = [];
 
     const labelColors = THEMES[theme].labels;
     const labelFgs = THEMES[theme].labelsFg;
@@ -509,7 +538,7 @@ function mapRowToEditInitial(row: EventRow) {
         onEdit={(e) => {
           setOpenPreview(false);
           setEditingId(e.id);
-          setEditInitial(mapRowToEditInitial(e as any));
+          setEditInitial(mapRowToEditInitial(e));
           setOpenEdit(true);
         }}
         onDelete={(e) => { void handleDelete(e); }}

@@ -39,8 +39,9 @@ export default function IcsImportModal({ open, onClose, onImported }: Props) {
       if (!res.ok) throw new Error(json.error || 'No se pudo importar');
       onImported?.(json.count ?? 0);
       onClose();
-    } catch (e: any) {
-      setErr(e?.message || 'Error al importar');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al importar';
+      setErr(message);
     } finally {
       setLoading(false);
     }

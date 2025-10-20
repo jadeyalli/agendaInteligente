@@ -30,8 +30,9 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ ok: true, count: importedIds.length, importedIds });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('POST /api/import-ics', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    const message = e instanceof Error ? e.message : 'Server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
