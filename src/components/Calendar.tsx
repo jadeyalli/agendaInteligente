@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { EventInput } from '@fullcalendar/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -14,6 +13,13 @@ import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
 
 import { THEMES, currentTheme } from '@/theme/themes';
+import {
+  dateToDateStringLocal,      // ✅ NUEVO
+  dateToTimeStringLocal,       // ✅ NUEVO
+  dateAndTimeToDateLocal,      // ✅ NUEVO
+  debugDateFull,               // ✅ NUEVO (para debug)
+  isoToDate,
+} from '@/lib/timezone';
 
 export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
 export type CalendarMeta = { view: ViewId; title: string; start: Date; end: Date };
@@ -27,7 +33,7 @@ type EventRow = {
   title: string;
   description?: string | null;
   category?: string | null;
-  priority?: PriorityCode | null;
+  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO' | null;
 
   // tiempo
   start?: string | null;
@@ -196,35 +202,43 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
   }
 
-  // Mapea EventRow a los valores iniciales de CreateEditModal
-  function mapRowToEditInitial(row: EventRow): ModalInitial {
-    if (row.kind === 'TAREA') {
-      return {
-        kind: 'TAREA',
-        title: row.title,
-        description: row.description ?? '',
-        category: row.category ?? '',
-        repeat: 'NONE',
-        dueDate: row.dueDate ? row.dueDate.slice(0, 10) : '',
-      };
-    }
-    const date = row.start ? row.start.slice(0, 10) : '';
-    const timeStart = row.start ? new Date(row.start).toISOString().slice(11, 16) : '';
-    const timeEnd = row.end ? new Date(row.end).toISOString().slice(11, 16) : '';
+function mapRowToEditInitial(row: EventRow) {
+  // Si es TAREA
+  if (row.kind === 'TAREA') {
+    const dueDate = row.dueDate ? isoToDate(row.dueDate) : null;
     return {
-      kind: 'EVENTO',
+      kind: 'TAREA',
       title: row.title,
       description: row.description ?? '',
       category: row.category ?? '',
-      priority: row.priority ?? 'RELEVANTE',
+      priority: (row.priority ?? 'RELEVANTE') as any,
       repeat: 'NONE',
-      window: 'NONE',
-      date,
-      timeStart,
-      timeEnd,
+      dueDate: dateToDateStringLocal(dueDate),  // ✅ CAMBIO: dateToDateStringLocal
     };
   }
 
+  // Si es EVENTO o RECORDATORIO
+  const startDate = row.start ? isoToDate(row.start) : null;
+  const endDate = row.end ? isoToDate(row.end) : null;
+
+  // ✅ DEBUG
+  debugDateFull('START en mapRowToEditInitial', startDate);
+  debugDateFull('END en mapRowToEditInitial', endDate);
+
+  return {
+    kind: 'EVENTO',
+    title: row.title,
+    description: row.description ?? '',
+    category: row.category ?? '',
+    priority: (row.priority ?? 'RELEVANTE') as any,
+    repeat: 'NONE',
+    window: 'NONE',
+    // ✅ CAMBIOS PRINCIPALES:
+    date: dateToDateStringLocal(startDate),      // Local, no UTC
+    timeStart: dateToTimeStringLocal(startDate), // Local, no UTC
+    timeEnd: dateToTimeStringLocal(endDate),     // Local, no UTC
+  };
+}
   // ====== Mapeo a FullCalendar con colores del tema ======
   const fcEvents = useMemo<EventInput[]>(() => {
     if (!rows.length) return [];
@@ -239,7 +253,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       const endStr = row.end || null;
       const dueStr = row.dueDate || null;
       const windowCode = row.window || 'NONE';
-      const p: PriorityCode = row.priority ?? 'RELEVANTE';
+      const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
       const classNames = [`prio-${p}`];
 
       // 1) Eventos con start/end
@@ -417,8 +431,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             stickyHeaderDates
             height="auto"
             slotDuration="00:30:00"
-            slotMinTime="00:00:00"
-            slotMaxTime="24:00:00"
+            slotMinTime="05:00:00"
+            slotMaxTime="23:00:00"
             allDaySlot
             selectable
             selectMirror

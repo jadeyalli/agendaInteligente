@@ -236,6 +236,28 @@ export async function PATCH(req: Request) {
       }
     }
 
+    if (data.priority) {
+      const policy = priorityPolicy(data.priority);
+      data.participatesInScheduling = policy.participatesInScheduling;
+      data.isFixed = policy.isFixed;
+
+      if (data.priority === 'RECORDATORIO') {
+        data.status = data.status ?? 'SCHEDULED';
+        data.window = 'NONE';
+        data.windowStart = null;
+        data.windowEnd = null;
+      } else if (policy.status === 'WAITLIST') {
+        data.status = 'WAITLIST';
+        data.start = null;
+        data.end = null;
+        data.window = 'NONE';
+        data.windowStart = null;
+        data.windowEnd = null;
+      } else {
+        data.status = data.status ?? 'SCHEDULED';
+      }
+    }
+
     // Normaliza nullables a undefined para Prisma si no se quiere tocar
     const updated = await prisma.event.update({
       where: { id },
@@ -785,6 +807,7 @@ const EventCreateSchema_EVENTO = z.object({
   calendarId: z.string().nullish(),
 });
 
+
 const EventCreateSchema_TAREA = z.object({
   kind: z.literal('TAREA'),
   title: z.string().trim().min(1),
@@ -799,9 +822,26 @@ const EventCreateSchema_TAREA = z.object({
   calendarId: z.string().nullish(),
 });
 
+// Agregar después de EventCreateSchema_TAREA y antes de EventCreateSchema
+
+const EventCreateSchema_RECORDATORIO = z.object({
+  kind: z.literal('RECORDATORIO'),
+  title: z.string().trim().min(1),
+  description: z.string().trim().nullish(),
+  category: z.string().nullish(),
+
+  repeat: z.nativeEnum(RepeatRule).default('NONE'),
+  isAllDay: z.boolean().default(false),
+  start: zDate,      // fecha opcional para recordatorios
+  end: zDate,        // hora fin opcional
+  calendarId: z.string().nullish(),
+});
+
+// Modificar EventCreateSchema para incluir RECORDATORIO:
 const EventCreateSchema = z.discriminatedUnion('kind', [
   EventCreateSchema_EVENTO,
   EventCreateSchema_TAREA,
+  EventCreateSchema_RECORDATORIO,  // ← Agregar esta línea
 ]);
 
 type EventCreatePayload = z.infer<typeof EventCreateSchema_EVENTO>;
@@ -857,18 +897,15 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
     throw new Error('Para repetir un evento debes proporcionar fecha y hora de inicio (start).');
   }
 
-  // RRULE opcional en el master (informativo)
+  // RRULE usando UTC
   const rrule =
     needsSeries && normalizedStart
       ? `FREQ=${data.repeat};INTERVAL=1;DTSTART=${normalizedStart.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`
       : null;
 
   const baseStart = normalizedStart ?? null;
-  const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [];
-  const firstStart = series.length ? series[0].start : null;
-  const firstEnd = series.length ? series[0].end : null;
+  const series = baseStart ? buildSeries(baseStart, normalizedEnd ?? null, data.repeat) : [{ start: null as any, end: null }];
 
-  // Crea master = primera ocurrencia
   const master = await prisma.event.create({
     data: {
       userId,
@@ -1059,7 +1096,13 @@ export async function POST(req: Request) {
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
     } else {
       items = await createTaskSeries(user.id, data);
+    } else if (data.kind === 'RECORDATORIO') {
+      // ← Agregar manejo para RECORDATORIO
+      items = await createReminderSeries(user.id, data);
+    } else {
+      throw new Error('Invalid event kind');
     }
+    
     return NextResponse.json({ count: items.length, items }, { status: 201 });
   } catch (e: unknown) {
     console.error('POST /api/events error', e);
@@ -1084,8 +1127,24 @@ export async function GET(req: Request) {
       orderBy: [{ start: 'asc' }, { createdAt: 'desc' }],
       take: 5000,
     });
-    return NextResponse.json(rows);
-  } catch (e: unknown) {
+
+    // ✅ GARANTIZAR que todas las fechas sean ISO strings
+    const normalized = rows.map((event) => ({
+      ...event,
+      start: event.start ? event.start.toISOString() : null,
+      end: event.end ? event.end.toISOString() : null,
+      dueDate: event.dueDate ? event.dueDate.toISOString() : null,
+      windowStart: event.windowStart ? event.windowStart.toISOString() : null,
+      windowEnd: event.windowEnd ? event.windowEnd.toISOString() : null,
+      createdAt: event.createdAt.toISOString(),
+      updatedAt: event.updatedAt.toISOString(),
+      lastModified: event.lastModified ? event.lastModified.toISOString() : null,
+      createdIcal: event.createdIcal ? event.createdIcal.toISOString() : null,
+      completedAt: event.completedAt ? event.completedAt.toISOString() : null,
+    }));
+
+    return NextResponse.json(normalized);
+  } catch (e) {
     console.error('GET /api/events error', e);
     const message = e instanceof Error ? e.message : 'Server error';
     return NextResponse.json({ error: message }, { status: 500 });
