@@ -13,6 +13,11 @@ import {
   Repeat as RepeatIcon,
   CalendarRange,
 } from "lucide-react";
+import {
+  dateAndTimeToDateLocal,
+  dateStringToEndOfDay,
+  dateStringToStartOfDay,
+} from "@/lib/datetime";
 
 import {
   dateAndTimeToDateLocal,  // ✅ NUEVO: para crear Date desde inputs locales
@@ -214,14 +219,11 @@ import {
 
 // Map para EVENTO (no solapable)
 function mapEvent(f: EventForm) {
-  const toDateTime = (date?: string, time?: string) => {
-    if (!date) return null;
-    const safeTime = time && time.length >= 4 ? time : '00:00';
-    return new Date(`${date}T${safeTime}:00`);
-  };
-
-  const start = f.date ? toDateTime(f.date, f.timeStart) : null;
-  const end = f.timeEnd && f.date ? toDateTime(f.date, f.timeEnd) : null;
+  const startAt = dateAndTimeToDateLocal(f.date, f.timeStart);
+  const endAt = dateAndTimeToDateLocal(f.date, f.timeEnd);
+  const windowStartAt = f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart) : null;
+  const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd) : null;
+  const isAllDay = Boolean(f.date && !f.timeStart && !f.timeEnd);
 
   const base: any = {
     kind: "EVENTO",
@@ -230,85 +232,58 @@ function mapEvent(f: EventForm) {
     category: f.category || null,
     priority: f.priority,
     repeat: f.repeat,
-    isInPerson: true,
-    canOverlap: false,
-  };
-
-  if (f.priority === "RECORDATORIO") {
-    return {
-      ...base,
-      participatesInScheduling: false,
-      status: "SCHEDULED",
-      window: "NONE",
-      windowStart: null,
-      windowEnd: null,
-      isAllDay: !!(f.date && !f.timeStart && !f.timeEnd),
-      start,
-      end,
-    };
-  }
-
-  if (f.priority === "OPCIONAL") {
-    return {
-      ...base,
-      status: "WAITLIST",
-      participatesInScheduling: false,
-      window: "NONE",
-      windowStart: null,
-      windowEnd: null,
-      start: null,
-      end: null,
-    };
-  }
-
-  if (f.priority === "CRITICA") {
-    // ✅ CAMBIO: Usar dateAndTimeToDateLocal
-    const start = dateAndTimeToDateLocal(f.date, f.timeStart);
-    const end = dateAndTimeToDateLocal(f.date, f.timeEnd);
-
-    debugDateFull('mapEvent CRITICA START', start);
-    debugDateFull('mapEvent CRITICA END', end);
-
-    return {
-      ...base,
-      isFixed: true,
-      participatesInScheduling: true,
-      transparency: "OPAQUE",
-      start,
-      end,
-    };
-  }
-
-  // URGENTE / RELEVANTE
-  const start = f.date && f.timeStart
-    ? dateAndTimeToDateLocal(f.date, f.timeStart)
-    : null;
-  const end = f.date && f.timeEnd
-    ? dateAndTimeToDateLocal(f.date, f.timeEnd)
-    : null;
-
-  const windowStart = f.window === "RANGO" && f.windowStart
-    ? dateAndTimeToDateLocal(f.windowStart, "00:00")
-    : null;
-
-  const windowEnd = f.window === "RANGO" && f.windowEnd
-    ? dateAndTimeToDateLocal(f.windowEnd, "23:59")
-    : null;
-
-  debugDateFull('mapEvent URGENTE/RELEVANTE START', start);
-  debugDateFull('mapEvent URGENTE/RELEVANTE END', end);
-
-  return {
-    ...base,
-    isFixed: false,
-    participatesInScheduling: true,
-    transparency: "OPAQUE",
     window: f.window,
-    windowStart: f.window === "RANGO" && f.windowStart ? new Date(`${f.windowStart}T00:00:00`) : null,
-    windowEnd: f.window === "RANGO" && f.windowEnd ? new Date(`${f.windowEnd}T23:59:59`) : null,
-    start,
-    end,
+    windowStart: windowStartAt,
+    windowEnd: windowEndAt,
+    isAllDay,
   };
+
+  switch (f.priority) {
+    case "RECORDATORIO": {
+      return {
+        ...base,
+        participatesInScheduling: false,
+        status: "SCHEDULED",
+        window: "NONE",
+        windowStart: null,
+        windowEnd: null,
+        start: startAt,
+        end: endAt,
+      };
+    }
+    case "OPCIONAL": {
+      return {
+        ...base,
+        status: "WAITLIST",
+        participatesInScheduling: false,
+        window: "NONE",
+        windowStart: null,
+        windowEnd: null,
+        start: null,
+        end: null,
+      };
+    }
+    case "CRITICA": {
+      return {
+        ...base,
+        isFixed: true,
+        participatesInScheduling: true,
+        transparency: "OPAQUE",
+        start: startAt,
+        end: endAt,
+      };
+    }
+    default: {
+      return {
+        ...base,
+        isFixed: false,
+        participatesInScheduling: true,
+        transparency: "OPAQUE",
+        start: startAt,
+        end: endAt,
+      };
+    }
+  }
 }
 
 // Map para RECORDATORIO (solapable, sin solver)
@@ -333,10 +308,13 @@ function mapReminder(f: ReminderForm) {
     title: f.title.trim(),
     description: f.description?.trim() || null,
     category: f.category || null,
-    isAllDay: !!f.isAllDay,
-    repeat: f.repeat,
-    start,
-    end,
+    shareLink: f.shareLink,
+    window: f.window,
+    windowStart: f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart) : null,
+    windowEnd: f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd) : null,
+    start: dateAndTimeToDateLocal(f.date, f.timeStart),
+    end: dateAndTimeToDateLocal(f.date, f.timeEnd),
+    participatesInScheduling: true,
   };
 }
 
@@ -499,6 +477,35 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
               </Select>
             </Field>
             <div />
+          </Row>
+        </>
+      )}
+
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
           </Row>
         </>
       )}

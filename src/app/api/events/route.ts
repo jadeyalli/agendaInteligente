@@ -69,7 +69,7 @@ function sanitizeEventPayload(
 
   const clone: Record<string, unknown> = { ...raw };
 
-  const booleanKeys = ['isInPerson', 'canOverlap', 'participatesInScheduling', 'isFixed'] as const;
+  const booleanKeys = ['participatesInScheduling', 'isFixed'] as const;
   for (const key of booleanKeys) {
     if (key in clone) {
       const coerced = coerceBoolean(clone[key]);
@@ -188,8 +188,6 @@ const PatchSchema = z.object({
   todoStatus: z.nativeEnum(ICalTodoStatus).optional(),
 
   // comportamiento
-  isInPerson: z.boolean().optional(),
-  canOverlap: z.boolean().optional(),
   participatesInScheduling: z.boolean().optional(),
   status: z.string().optional(),
 
@@ -218,11 +216,9 @@ export async function PATCH(req: Request) {
       const policy = priorityPolicy(data.priority);
       data.participatesInScheduling = policy.participatesInScheduling;
       data.isFixed = policy.isFixed;
-      data.isInPerson = true;
 
       if (data.priority === 'RECORDATORIO') {
         data.status = data.status ?? 'SCHEDULED';
-        data.canOverlap = true;
         data.window = 'NONE';
         data.windowStart = null;
         data.windowEnd = null;
@@ -233,13 +229,8 @@ export async function PATCH(req: Request) {
         data.window = 'NONE';
         data.windowStart = null;
         data.windowEnd = null;
-        data.canOverlap = false;
       } else {
         data.status = data.status ?? 'SCHEDULED';
-        data.canOverlap = false;
-        if (policy.isFixed) {
-          data.canOverlap = false;
-        }
       }
     }
 
@@ -259,8 +250,6 @@ export async function PATCH(req: Request) {
         dueDate: data.hasOwnProperty('dueDate') ? data.dueDate : undefined,
         todoStatus: data.todoStatus,
 
-        isInPerson: data.isInPerson,
-        canOverlap: data.canOverlap,
         participatesInScheduling: data.participatesInScheduling,
         status: data.status,
 
@@ -537,7 +526,6 @@ async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
         kind: 'EVENTO',
         participatesInScheduling: true,
         isFixed: false,
-        canOverlap: false,
         priority: { in: prioritiesToMove },
         start: { lt: current.end },
         end: { gt: current.start },
@@ -555,7 +543,6 @@ async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
         participatesInScheduling: true,
         start: { not: null },
         end: { not: null },
-        OR: [{ isFixed: true }, { canOverlap: false }],
       },
     });
 
@@ -630,7 +617,6 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
       event.kind === 'EVENTO' &&
       event.participatesInScheduling &&
       !event.isFixed &&
-      !event.canOverlap &&
       (event.priority === 'URGENTE' || event.priority === 'RELEVANTE') &&
       isUnsetDate(event.start)
   );
@@ -646,7 +632,6 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
       participatesInScheduling: true,
       start: { not: null },
       end: { not: null },
-      OR: [{ isFixed: true }, { canOverlap: false }],
       NOT: { id: { in: Array.from(candidateIds) } },
     },
   });
@@ -777,8 +762,6 @@ const EventCreateSchema_EVENTO = z.object({
   description: z.string().trim().nullish(),
   category: z.string().nullish(),
 
-  isInPerson: z.boolean().optional().default(true),
-  canOverlap: z.boolean().optional().default(false),
   priority: PrioritySchema.default('RELEVANTE'),
 
   repeat: z.nativeEnum(RepeatRule).default('NONE'),
@@ -844,20 +827,17 @@ function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreate
 
   next.participatesInScheduling = policy.participatesInScheduling;
   next.isFixed = policy.isFixed;
-  next.isInPerson = true;
+  next.status = policy.status;
 
   if (next.priority === 'RECORDATORIO') {
     next.participatesInScheduling = false;
     next.isFixed = false;
     next.status = 'SCHEDULED';
-    next.canOverlap = true;
     next.window = 'NONE';
     next.windowStart = null;
     next.windowEnd = null;
     return next;
   }
-
-  next.canOverlap = false;
 
   if (policy.status === 'WAITLIST') {
     next.status = 'WAITLIST';
@@ -875,10 +855,6 @@ function applyPriorityPolicyToEventCreate(data: EventCreatePayload): EventCreate
     next.status = next.status ?? 'SCHEDULED';
   }
 
-  if (policy.isFixed) {
-    next.canOverlap = false;
-  }
-
   return next;
 }
 
@@ -888,6 +864,7 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
   const normalizedEnd = data.end && !isUnsetDate(data.end) ? data.end : null;
   const normalizedWindowStart = data.windowStart && !isUnsetDate(data.windowStart) ? data.windowStart : null;
   const normalizedWindowEnd = data.windowEnd && !isUnsetDate(data.windowEnd) ? data.windowEnd : null;
+  const allowOverlap = data.priority === 'RECORDATORIO';
 
   const needsSeries = data.repeat !== 'NONE';
   if (needsSeries && !normalizedStart) {
@@ -912,8 +889,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       description: data.description ?? null,
       category: data.category ?? null,
 
-      isInPerson: data.isInPerson,
-      canOverlap: data.canOverlap ?? false,
+      isInPerson: true,
+      canOverlap: allowOverlap,
 
       priority: data.priority,
       repeat: data.repeat,
@@ -949,8 +926,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
         description: data.description ?? null,
         category: data.category ?? null,
 
-        isInPerson: data.isInPerson,
-        canOverlap: data.canOverlap ?? false,
+        isInPerson: true,
+        canOverlap: allowOverlap,
 
         priority: data.priority,
         repeat: 'NONE',
