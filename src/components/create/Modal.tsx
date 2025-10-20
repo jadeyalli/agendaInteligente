@@ -23,7 +23,7 @@ import {
  * CreateEditModal
  * ========================================================= */
 
-type Priority = "CRITICA" | "URGENTE" | "RELEVANTE" | "OPCIONAL";
+type Priority = "CRITICA" | "URGENTE" | "RELEVANTE" | "OPCIONAL" | "RECORDATORIO";
 type RepeatRule = "NONE" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 type AvailabilityWindow = "NONE" | "PRONTO" | "SEMANA" | "MES" | "RANGO";
 
@@ -214,6 +214,15 @@ import {
 
 // Map para EVENTO (no solapable)
 function mapEvent(f: EventForm) {
+  const toDateTime = (date?: string, time?: string) => {
+    if (!date) return null;
+    const safeTime = time && time.length >= 4 ? time : '00:00';
+    return new Date(`${date}T${safeTime}:00`);
+  };
+
+  const start = f.date ? toDateTime(f.date, f.timeStart) : null;
+  const end = f.timeEnd && f.date ? toDateTime(f.date, f.timeEnd) : null;
+
   const base: any = {
     kind: "EVENTO",
     title: f.title.trim(),
@@ -225,11 +234,30 @@ function mapEvent(f: EventForm) {
     canOverlap: false,
   };
 
+  if (f.priority === "RECORDATORIO") {
+    return {
+      ...base,
+      participatesInScheduling: false,
+      status: "SCHEDULED",
+      window: "NONE",
+      windowStart: null,
+      windowEnd: null,
+      isAllDay: !!(f.date && !f.timeStart && !f.timeEnd),
+      start,
+      end,
+    };
+  }
+
   if (f.priority === "OPCIONAL") {
     return {
       ...base,
       status: "WAITLIST",
       participatesInScheduling: false,
+      window: "NONE",
+      windowStart: null,
+      windowEnd: null,
+      start: null,
+      end: null,
     };
   }
 
@@ -276,8 +304,8 @@ function mapEvent(f: EventForm) {
     participatesInScheduling: true,
     transparency: "OPAQUE",
     window: f.window,
-    windowStart,
-    windowEnd,
+    windowStart: f.window === "RANGO" && f.windowStart ? new Date(`${f.windowStart}T00:00:00`) : null,
+    windowEnd: f.window === "RANGO" && f.windowEnd ? new Date(`${f.windowEnd}T23:59:59`) : null,
     start,
     end,
   };
@@ -358,6 +386,7 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
   const isCritica = f.priority === "CRITICA";
   const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
   const isOpcional = f.priority === "OPCIONAL";
+  const isReminder = f.priority === "RECORDATORIO";
   const canSubmit = f.title.trim().length > 0 && (!isCritica || (f.date && f.timeStart && f.timeEnd));
 
   return (
@@ -387,6 +416,7 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
             <option value="URGENTE">Urgente</option>
             <option value="RELEVANTE">Relevante</option>
             <option value="OPCIONAL">Opcional</option>
+            <option value="RECORDATORIO">Recordatorio</option>
           </Select>
         </Field>
         <div />
@@ -469,6 +499,35 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
               </Select>
             </Field>
             <div />
+          </Row>
+        </>
+      )}
+
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
           </Row>
         </>
       )}

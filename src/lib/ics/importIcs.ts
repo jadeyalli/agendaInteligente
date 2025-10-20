@@ -211,7 +211,7 @@ export async function importIcsFromText(
                 canOverlap: true,
                 participatesInScheduling: false,
                 isFixed: false,
-                priority: 'RELEVANTE' as const,
+                priority: 'RECORDATORIO' as const,
                 statusIcal,
                 sequence,
                 category: 'AVISO',

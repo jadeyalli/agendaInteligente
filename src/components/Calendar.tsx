@@ -31,7 +31,7 @@ type EventRow = {
   title: string;
   description?: string | null;
   category?: string | null;
-  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | null;
+  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO' | null;
 
   // tiempo
   start?: string | null;
@@ -182,6 +182,7 @@ function mapRowToEditInitial(row: EventRow) {
       title: row.title,
       description: row.description ?? '',
       category: row.category ?? '',
+      priority: (row.priority ?? 'RELEVANTE') as any,
       repeat: 'NONE',
       dueDate: dateToDateStringLocal(dueDate),  // ✅ CAMBIO: dateToDateStringLocal
     };
@@ -223,7 +224,7 @@ function mapRowToEditInitial(row: EventRow) {
       const endStr = row.end || null;
       const dueStr = row.dueDate || null;
       const windowCode = row.window || 'NONE';
-      const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL';
+      const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
       const classNames = [`prio-${p}`];
 
       // 1) Eventos con start/end
