@@ -352,6 +352,67 @@ const DEFAULT_DURATION_MINUTES = 60;
 const WORK_START_HOUR = 5;
 const WORK_END_HOUR = 23;
 
+function mergeBusyIntervals(list: BusyInterval[]): BusyInterval[] {
+  if (!list.length) return [];
+
+  const sorted = [...list].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: BusyInterval[] = [];
+
+  for (const current of sorted) {
+    const candidate = { start: new Date(current.start), end: new Date(current.end) };
+
+    if (!merged.length) {
+      merged.push(candidate);
+      continue;
+    }
+
+    const last = merged[merged.length - 1];
+    if (candidate.start.getTime() <= last.end.getTime()) {
+      if (candidate.end.getTime() > last.end.getTime()) {
+        last.end = candidate.end;
+      }
+    } else {
+      merged.push(candidate);
+    }
+  }
+
+  return merged;
+}
+
+function mergeWeightedBusyIntervals(list: WeightedBusyInterval[]): WeightedBusyInterval[] {
+  if (!list.length) return [];
+
+  const sorted = [...list].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: WeightedBusyInterval[] = [];
+
+  for (const current of sorted) {
+    const candidate: WeightedBusyInterval = {
+      start: new Date(current.start),
+      end: new Date(current.end),
+      weight: current.weight,
+    };
+
+    if (!merged.length) {
+      merged.push(candidate);
+      continue;
+    }
+
+    const last = merged[merged.length - 1];
+    if (candidate.start.getTime() <= last.end.getTime()) {
+      if (candidate.end.getTime() > last.end.getTime()) {
+        last.end = candidate.end;
+      }
+      if (candidate.weight > last.weight) {
+        last.weight = candidate.weight;
+      }
+    } else {
+      merged.push(candidate);
+    }
+  }
+
+  return merged;
+}
+
 function ensurePositiveDurationMs(event: Event): number {
   if (event.start && event.end) {
     const diff = event.end.getTime() - event.start.getTime();
@@ -465,7 +526,7 @@ function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | n
 }
 
 function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: BusyInterval[]): Date | null {
-  const sorted = [...busy].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const sorted = mergeBusyIntervals(busy);
   let cursor = clampToWorkingHours(start);
   const limit = end ? end.getTime() : Number.POSITIVE_INFINITY;
 
@@ -510,8 +571,7 @@ function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: B
 
 function upsertInterval(list: BusyInterval[], interval: BusyInterval): BusyInterval[] {
   const next = [...list, interval];
-  next.sort((a, b) => a.start.getTime() - b.start.getTime());
-  return next;
+  return mergeBusyIntervals(next);
 }
 
 function upsertWeightedInterval(
@@ -519,8 +579,7 @@ function upsertWeightedInterval(
   interval: WeightedBusyInterval
 ): WeightedBusyInterval[] {
   const next = [...list, interval];
-  next.sort((a, b) => a.start.getTime() - b.start.getTime());
-  return next;
+  return mergeWeightedBusyIntervals(next);
 }
 
 function priorityWeight(priority: Priority): number {
@@ -573,6 +632,8 @@ async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
     let busy: BusyInterval[] = blockingEvents
       .filter((event) => !toMoveIds.has(event.id) && event.start && event.end)
       .map((event) => ({ start: event.start!, end: event.end! }));
+
+    busy = mergeBusyIntervals(busy);
 
     const sortedOverlaps = [...overlapping].sort((a, b) => {
       const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
@@ -670,6 +731,8 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
       weight: priorityWeight(event.priority),
     }));
 
+  busy = mergeWeightedBusyIntervals(busy);
+
   const sorted = [...toSchedule].sort((a, b) => {
     const diff = priorityWeight(b.priority) - priorityWeight(a.priority);
     if (diff !== 0) return diff;
@@ -695,9 +758,11 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
 
     const durationMs = ensurePositiveDurationMs(event);
     const candidateWeight = priorityWeight(event.priority);
-    const effectiveBusy = busy
-      .filter((interval) => interval.weight >= candidateWeight)
-      .map(({ start, end }) => ({ start, end }));
+    const effectiveBusy = mergeBusyIntervals(
+      busy
+        .filter((interval) => interval.weight >= candidateWeight)
+        .map(({ start, end }) => ({ start, end }))
+    );
     const nextSlot = findNextSlot(durationMs, window.start, window.end, effectiveBusy);
 
     if (!nextSlot) {
