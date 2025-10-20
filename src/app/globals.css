@@ -3,20 +3,22 @@
 
 /* neutrales por defecto (pastel) */
 :root {
-  --bg: #f7f7f9;
+  --bg: #f8fafc;
   --surface: #ffffff;
   --fg: #0f172a;
-  --muted: #64748b;
+  --muted: #475569;
 
-  --prio-critica: #bfefa2;
-  --prio-urgente: #f4d283;
-  --prio-relevante: #ffb294;
-  --prio-opcional: #ff9fc2;
+  --prio-critica: #dc2626;
+  --prio-urgente: #ea580c;
+  --prio-relevante: #2563eb;
+  --prio-opcional: #0d9488;
+  --prio-recordatorio: #7c3aed;
 
-  --prio-critica-fg: #0f172a;
-  --prio-urgente-fg: #0f172a;
-  --prio-relevante-fg: #0f172a;
-  --prio-opcional-fg: #0f172a;
+  --prio-critica-fg: #ffffff;
+  --prio-urgente-fg: #ffffff;
+  --prio-relevante-fg: #ffffff;
+  --prio-opcional-fg: #ffffff;
+  --prio-recordatorio-fg: #fdf4ff;
 }
 
 /* helpers */
@@ -30,6 +32,7 @@
 .fc .fc-event.prio-URGENTE { background: var(--prio-urgente) !important; border-color: var(--prio-urgente) !important; color: var(--prio-urgente-fg) !important; }
 .fc .fc-event.prio-RELEVANTE { background: var(--prio-relevante) !important; border-color: var(--prio-relevante) !important; color: var(--prio-relevante-fg) !important; }
 .fc .fc-event.prio-OPCIONAL { background: var(--prio-opcional) !important; border-color: var(--prio-opcional) !important; color: var(--prio-opcional-fg) !important; }
+.fc .fc-event.prio-RECORDATORIO { background: var(--prio-recordatorio) !important; border-color: var(--prio-recordatorio) !important; color: var(--prio-recordatorio-fg) !important; }
 
 
 @theme inline {

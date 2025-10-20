@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { EventInput } from '@fullcalendar/core';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -8,7 +9,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
-import CreateEditModal from '@/components/create/Modal';
+import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
 
@@ -18,13 +19,15 @@ export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMon
 export type CalendarMeta = { view: ViewId; title: string; start: Date; end: Date };
 export type CalendarProps = { onViewChange?: (meta: CalendarMeta) => void };
 
+type PriorityCode = 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
+
 type EventRow = {
   id: string;
   kind: 'EVENTO' | 'TAREA' | 'SOLICITUD';
   title: string;
   description?: string | null;
   category?: string | null;
-  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | null;
+  priority?: PriorityCode | null;
 
   // tiempo
   start?: string | null;
@@ -40,13 +43,37 @@ type EventRow = {
   windowEnd?: string | null;
 };
 
+type ModalInitialEvent = {
+  kind: 'EVENTO';
+  title: string;
+  description: string;
+  category: string;
+  priority: PriorityCode;
+  repeat: 'NONE';
+  window: 'NONE';
+  date: string;
+  timeStart: string;
+  timeEnd: string;
+};
+
+type ModalInitialTask = {
+  kind: 'TAREA';
+  title: string;
+  description: string;
+  category: string;
+  repeat: 'NONE';
+  dueDate: string;
+};
+
+type ModalInitial = ModalInitialEvent | ModalInitialTask;
+
 export default function Calendar({ onViewChange }: CalendarProps) {
   // === tema (escucha cambios emitidos por la página) ===
   const [theme, setTheme] = useState(currentTheme());
   useEffect(() => {
     const onChange = () => setTheme(currentTheme());
-    window.addEventListener('ai-theme-change', onChange as any);
-    return () => window.removeEventListener('ai-theme-change', onChange as any);
+    window.addEventListener('ai-theme-change', onChange);
+    return () => window.removeEventListener('ai-theme-change', onChange);
   }, []);
 
   // === estado calendario ===
@@ -58,7 +85,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [creating, setCreating] = useState(false);
 
   const [openEdit, setOpenEdit] = useState(false);
-  const [editInitial, setEditInitial] = useState<any>(null);
+  const [editInitial, setEditInitial] = useState<ModalInitial | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [openImport, setOpenImport] = useState(false);
@@ -82,7 +109,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   // helper: YYYY-MM-DD
   const toDateOnly = (d: string | Date | null | undefined) => {
     if (!d) return null;
-    const s = typeof d === 'string' ? d : (d as Date).toISOString();
+    const s = typeof d === 'string' ? d : d.toISOString();
     return s.slice(0, 10);
   };
 
@@ -104,7 +131,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   useEffect(() => { loadEvents(); }, []);
 
   // ====== Crear desde el modal ======
-  async function handleCreateFromModal(payload: any) {
+  async function handleCreateFromModal(payload: CreateModalSubmitPayload) {
     try {
       setCreating(true);
       const res = await fetch('/api/events', {
@@ -116,15 +143,16 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       }
       setOpenCreate(false);
       await loadEvents();
-    } catch (e: any) {
-      alert(e.message || 'Error al crear');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al crear';
+      alert(message);
     } finally {
       setCreating(false);
     }
   }
 
   // ====== Editar desde el modal ======
-  async function handleEditFromModal(payload: any) {
+  async function handleEditFromModal(payload: CreateModalSubmitPayload) {
     if (!editingId) return;
     try {
       setCreating(true);
@@ -140,8 +168,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setOpenEdit(false);
       setEditingId(null);
       await loadEvents();
-    } catch (e: any) {
-      alert(e.message || 'Error al actualizar');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al actualizar';
+      alert(message);
     } finally {
       setCreating(false);
     }
@@ -159,15 +188,16 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setOpenPreview(false);
       setSelected(null);
       await loadEvents();
-    } catch (err: any) {
-      alert(err.message || 'Error al eliminar');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error al eliminar';
+      alert(message);
     } finally {
       setDeleting(false);
     }
   }
 
   // Mapea EventRow a los valores iniciales de CreateEditModal
-  function mapRowToEditInitial(row: EventRow) {
+  function mapRowToEditInitial(row: EventRow): ModalInitial {
     if (row.kind === 'TAREA') {
       return {
         kind: 'TAREA',
@@ -186,9 +216,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       title: row.title,
       description: row.description ?? '',
       category: row.category ?? '',
-      isInPerson: true,
-      canOverlap: false,
-      priority: (row.priority ?? 'RELEVANTE') as any,
+      priority: row.priority ?? 'RELEVANTE',
       repeat: 'NONE',
       window: 'NONE',
       date,
@@ -198,9 +226,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }
 
   // ====== Mapeo a FullCalendar con colores del tema ======
-  const fcEvents = useMemo(() => {
+  const fcEvents = useMemo<EventInput[]>(() => {
     if (!rows.length) return [];
-    const out: any[] = [];
+    const out: EventInput[] = [];
 
     const labelColors = THEMES[theme].labels;
     const labelFgs = THEMES[theme].labelsFg;
@@ -211,7 +239,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       const endStr = row.end || null;
       const dueStr = row.dueDate || null;
       const windowCode = row.window || 'NONE';
-      const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL';
+      const p: PriorityCode = row.priority ?? 'RELEVANTE';
       const classNames = [`prio-${p}`];
 
       // 1) Eventos con start/end
@@ -303,17 +331,17 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const viewBtn = (active: boolean) =>
     [
       'inline-flex items-center justify-center rounded-lg border px-3 py-1.5 text-sm font-medium transition',
-      active ? 'bg-slate-900 text-white border-slate-900'
-        : 'bg-white text-slate-900 border-slate-400 hover:bg-slate-50',
+      active
+        ? 'bg-[var(--fg)] text-[var(--bg)] border-[var(--fg)]'
+        : 'bg-[var(--surface)] text-[var(--fg)] border-slate-300 hover:bg-slate-100',
     ].join(' ');
   const navBtn =
-    'inline-flex items-center rounded-lg bg-white border border-slate-400 px-3 py-1.5 text-sm text-slate-900 hover:bg-slate-100';
+    'inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium transition bg-[var(--surface)] text-[var(--fg)] hover:bg-slate-100';
   const arrowBtn =
-    'inline-flex items-center rounded-lg border px-3 py-1.5 text-sm font-medium transition ' +
-    'bg-white text-blue-700 border-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40';
+    'inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium transition bg-[var(--surface)] text-[var(--fg)] hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/30';
 
   return (
-    <div className="min-h-screen bg-slate-50" style={{ fontFamily: 'Inter, ui-sans-serif, system-ui' }}>
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]" style={{ fontFamily: 'Inter, ui-sans-serif, system-ui' }}>
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Toolbar */}
         <header className="mb-4 flex flex-col gap-3 sm:mb-6">
@@ -321,12 +349,12 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             {/* IZQUIERDA */}
             <div className="flex items-center gap-3">
               <button className={navBtn} type="button" onClick={today}>Hoy</button>
-              <div className="text-base font-semibold text-slate-900">{title || ' '}</div>
+              <div className="text-base font-semibold text-[var(--fg)]">{title || ' '}</div>
             </div>
 
             {/* DERECHA */}
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 text-[var(--fg)]">
                 <button className={viewBtn(view === 'timeGridDay')} onClick={() => changeView('timeGridDay')} type="button">Día</button>
                 <button className={viewBtn(view === 'timeGridWeek')} onClick={() => changeView('timeGridWeek')} type="button">Semana</button>
                 <button className={viewBtn(view === 'dayGridMonth')} onClick={() => changeView('dayGridMonth')} type="button">Mes</button>
@@ -341,7 +369,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
               {/* Toggle fines de semana */}
               <label className="relative inline-flex select-none items-center gap-2 pl-2">
-                <span className="text-sm text-slate-700">Fines de semana</span>
+                <span className="text-sm text-[var(--fg)]">Fines de semana</span>
                 <input
                   type="checkbox"
                   className="peer sr-only"
@@ -355,7 +383,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
               {/* Crear */}
               <button
-                className="ml-2 inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-white hover:bg-slate-800 disabled:opacity-60"
+                className="ml-2 inline-flex items-center rounded-xl bg-[var(--fg)] px-4 py-2 text-[var(--bg)] transition hover:opacity-90 disabled:opacity-60"
                 onClick={() => setOpenCreate(true)}
                 type="button"
                 disabled={creating}
@@ -363,7 +391,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
                 {creating ? 'Creando…' : 'Crear'}
               </button>
               <button
-                className="ml-2 inline-flex items-center rounded-xl bg-white px-4 py-2 text-blue-700 border border-blue-600 hover:bg-blue-50"
+                className="ml-2 inline-flex items-center rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-2 text-[var(--fg)] hover:bg-slate-100"
                 onClick={() => setOpenImport(true)}
                 type="button"
               >
@@ -374,7 +402,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         </header>
 
         {/* Calendario */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-3 sm:p-4 shadow-sm">
           <FullCalendar
             ref={calendarRef}
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin]}
@@ -396,6 +424,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             selectMirror
             editable={false}
             views={{
+              dayGridMonth: { dayMaxEventRows: 5 },
               multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
             }}
             dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
@@ -444,8 +473,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             eventContent={(arg) => {
               const timeText = arg.timeText ? `${arg.timeText} ` : '';
               return (
-                <div className="truncate text-xs sm:text-[13px] font-medium text-slate-800">
-                  <span className="text-slate-500">{timeText}</span>
+                <div className="truncate text-xs sm:text-[13px] font-medium text-[var(--fg)]">
+                  <span className="text-[var(--muted)]">{timeText}</span>
                   <span>{arg.event.title}</span>
                 </div>
               );
@@ -454,7 +483,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
               if (info.isToday) info.el.classList.add('fc-is-today-strong');
             }}
           />
-          {loading ? <div className="mt-2 text-sm text-slate-500">Cargando eventos…</div> : null}
+          {loading ? <div className="mt-2 text-sm text-[var(--muted)]">Cargando eventos…</div> : null}
         </div>
       </div>
 
@@ -495,7 +524,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         onEdit={(e) => {
           setOpenPreview(false);
           setEditingId(e.id);
-          setEditInitial(mapRowToEditInitial(e as any));
+          setEditInitial(mapRowToEditInitial(e));
           setOpenEdit(true);
         }}
         onDelete={(e) => { void handleDelete(e); }}

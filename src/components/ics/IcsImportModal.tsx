@@ -9,7 +9,7 @@ type Props = {
 };
 
 export default function IcsImportModal({ open, onClose, onImported }: Props) {
-  const [mode, setMode] = useState<'RESPECT' | 'SMART'>('RESPECT');
+  const [mode, setMode] = useState<'REMINDER' | 'SMART'>('REMINDER');
   const [calendarName, setCalendarName] = useState('Personal');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -39,8 +39,9 @@ export default function IcsImportModal({ open, onClose, onImported }: Props) {
       if (!res.ok) throw new Error(json.error || 'No se pudo importar');
       onImported?.(json.count ?? 0);
       onClose();
-    } catch (e: any) {
-      setErr(e?.message || 'Error al importar');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al importar';
+      setErr(message);
     } finally {
       setLoading(false);
     }
@@ -98,18 +99,18 @@ export default function IcsImportModal({ open, onClose, onImported }: Props) {
                 <input
                   type="radio"
                   name="mode"
-                  value="RESPECT"
-                  checked={mode === 'RESPECT'}
-                  onChange={() => setMode('RESPECT')}
+                  value="REMINDER"
+                  checked={mode === 'REMINDER'}
+                  onChange={() => setMode('REMINDER')}
                   disabled={loading}
                   className="mt-1 h-4 w-4 accent-blue-600"
                 />
                 <div>
                   <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                    Respetar horario
+                    Importar como recordatorios
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-400">
-                    Guarda start/end y RRULE tal cual (participa en agenda).
+                    Crea avisos de día completo que no usan el motor inteligente.
                   </div>
                 </div>
               </label>
@@ -129,7 +130,7 @@ export default function IcsImportModal({ open, onClose, onImported }: Props) {
                     Posicionamiento inteligente
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-400">
-                    Expande recurrencias como instancias reubicables (all-day).
+                    Crea eventos relevantes que respetan la recurrencia del calendario.
                   </div>
                 </div>
               </label>
