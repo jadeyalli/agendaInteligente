@@ -619,6 +619,35 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any
         </>
       )}
 
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
       {isOpcional && <p className={subtle}>Este elemento irá a la lista de espera y no requiere fecha u hora.</p>}
 
       <div className="flex justify-end gap-2 pt-2">
@@ -766,7 +795,7 @@ export default function CreateEditModal({
 
       {tab === "evento" && (
         <CrearEvento
-          initial={{ kind: "EVENTO", ...(initialValues ?? {}) }}
+          initial={{ ...(initialValues ?? {}), kind: "EVENTO" }}
           onSubmit={onSubmit}
           timeZone={timeZone}
         />

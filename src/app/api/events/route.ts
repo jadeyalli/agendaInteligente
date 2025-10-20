@@ -182,6 +182,7 @@ const PatchSchema = z.object({
   start: z.union([z.coerce.date(), z.null()]).optional(),
   end: z.union([z.coerce.date(), z.null()]).optional(),
   isAllDay: z.boolean().optional(),
+  isFixed: z.boolean().optional(),
 
   // tarea
   dueDate: z.union([z.coerce.date(), z.null()]).optional(),
@@ -275,6 +276,8 @@ export async function PATCH(req: Request) {
         todoStatus: data.todoStatus,
 
         participatesInScheduling: data.participatesInScheduling,
+        isFixed: data.isFixed,
+        canOverlap: data.priority ? (data.priority === 'RECORDATORIO' ? true : false) : undefined,
         status: data.status,
 
         window: data.window,
@@ -801,7 +804,6 @@ const EventCreateSchema_EVENTO = z.object({
 
   isFixed: z.boolean().optional(),
   participatesInScheduling: z.boolean().optional(),
-  transparency: z.string().optional(),
   status: z.string().optional(),
 
   calendarId: z.string().nullish(),
