@@ -262,8 +262,8 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   const endDate = row.end ? isoToDate(row.end) : null;
 
   // ✅ DEBUG
-  debugDateFull('START en mapRowToEditInitial', startDate, timeZone);
-  debugDateFull('END en mapRowToEditInitial', endDate, timeZone);
+  console.debug('START en mapRowToEditInitial', debugDateFull(startDate, timeZone));
+  console.debug('END en mapRowToEditInitial', debugDateFull(endDate, timeZone));
 
   return {
     kind: 'EVENTO',
