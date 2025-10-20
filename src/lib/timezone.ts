@@ -116,6 +116,53 @@ export function dateStringToEndOfDay(
   return new Date(base.getTime() + 59 * 1000 + 999);
 }
 
+export function isoToDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const candidate = new Date(value);
+  return Number.isNaN(candidate.getTime()) ? null : candidate;
+}
+
+function formatParts(
+  date: Date,
+  timeZone: string,
+  options: Intl.DateTimeFormatOptions,
+): Record<string, string> {
+  const dtf = new Intl.DateTimeFormat('en-US', { timeZone, ...options });
+  const out: Record<string, string> = {};
+  for (const part of dtf.formatToParts(date)) {
+    if (part.type === 'literal') continue;
+    out[part.type] = part.value;
+  }
+  return out;
+}
+
+export function dateToDateStringLocal(date?: Date | null, timeZone?: string | null): string {
+  if (!date) return '';
+  const tz = normalizeTimezone(timeZone);
+  try {
+    const parts = formatParts(date, tz, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const year = parts.year ?? String(date.getUTCFullYear());
+    const month = parts.month ?? String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = parts.day ?? String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+export function dateToTimeStringLocal(date?: Date | null, timeZone?: string | null): string {
+  if (!date) return '';
+  const tz = normalizeTimezone(timeZone);
+  try {
+    const parts = formatParts(date, tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const hour = parts.hour ?? String(date.getUTCHours()).padStart(2, '0');
+    const minute = parts.minute ?? String(date.getUTCMinutes()).padStart(2, '0');
+    return `${hour}:${minute}`;
+  } catch {
+    return date.toISOString().slice(11, 16);
+  }
+}
+
 export function debugDateFull(date?: Date | null, timeZone?: string | null): string {
   if (!date) return '—';
   const tz = normalizeTimezone(timeZone);
@@ -142,6 +189,9 @@ export type TimezoneHelpers = {
   dateAndTimeToDateLocal: typeof dateAndTimeToDateLocal;
   dateStringToStartOfDay: typeof dateStringToStartOfDay;
   dateStringToEndOfDay: typeof dateStringToEndOfDay;
+  dateToDateStringLocal: typeof dateToDateStringLocal;
+  dateToTimeStringLocal: typeof dateToTimeStringLocal;
+  isoToDate: typeof isoToDate;
   debugDateFull: typeof debugDateFull;
 };
 
@@ -150,5 +200,8 @@ export const timezoneHelpers: TimezoneHelpers = {
   dateAndTimeToDateLocal,
   dateStringToStartOfDay,
   dateStringToEndOfDay,
+  dateToDateStringLocal,
+  dateToTimeStringLocal,
+  isoToDate,
   debugDateFull,
 };
