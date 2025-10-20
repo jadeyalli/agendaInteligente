@@ -398,16 +398,16 @@ function mergeWeightedBusyIntervals(list: WeightedBusyInterval[]): WeightedBusyI
     }
 
     const last = merged[merged.length - 1];
-    if (candidate.start.getTime() <= last.end.getTime()) {
+    const overlaps = candidate.start.getTime() <= last.end.getTime();
+
+    if (overlaps && candidate.weight === last.weight) {
       if (candidate.end.getTime() > last.end.getTime()) {
         last.end = candidate.end;
       }
-      if (candidate.weight > last.weight) {
-        last.weight = candidate.weight;
-      }
-    } else {
-      merged.push(candidate);
+      continue;
     }
+
+    merged.push(candidate);
   }
 
   return merged;
