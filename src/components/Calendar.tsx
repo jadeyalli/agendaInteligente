@@ -63,13 +63,16 @@ type ModalInitialEvent = {
   timeEnd: string;
 };
 
-type ModalInitialTask = {
-  kind: 'TAREA';
+type ModalInitialReminder = {
+  kind: 'RECORDATORIO';
   title: string;
   description: string;
   category: string;
   repeat: 'NONE';
-  dueDate: string;
+  isAllDay: boolean;
+  date: string;
+  timeStart: string;
+  timeEnd: string;
 };
 
 type ModalInitialReminder = {
@@ -220,9 +223,15 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | null {
   // Si es TAREA
   if (row.kind === 'TAREA') {
-    const dueDate = row.dueDate ? isoToDate(row.dueDate) : null;
+    return null;
+  }
+
+  if (row.kind === 'RECORDATORIO' || row.priority === 'RECORDATORIO') {
+    const startDate = row.start ? isoToDate(row.start) : null;
+    const endDate = row.end ? isoToDate(row.end) : null;
+
     return {
-      kind: 'TAREA',
+      kind: 'RECORDATORIO',
       title: row.title,
       description: row.description ?? '',
       category: row.category ?? '',
