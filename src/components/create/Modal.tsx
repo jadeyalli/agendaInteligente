@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -12,7 +12,6 @@ import {
   Clock,
   Repeat as RepeatIcon,
   CalendarRange,
-  Link as LinkIcon,
 } from "lucide-react";
 import {
   dateAndTimeToDateLocal,
@@ -43,27 +42,16 @@ type EventForm = {
   timeEnd?: string;
 };
 
-type TaskForm = {
-  kind: "TAREA";
+type ReminderForm = {
+  kind: "RECORDATORIO";
   title: string;
   description?: string;
   category?: string;
+  isAllDay: boolean;
   repeat: RepeatRule;
-  dueDate?: string;
-};
-
-type RequestForm = {
-  kind: "SOLICITUD";
-  title: string;
-  description?: string;
-  category?: string;
-  shareLink: string;
-  window: AvailabilityWindow;
-  windowStart?: string;
-  windowEnd?: string;
-  date?: string;
-  timeStart?: string;
-  timeEnd?: string;
+  date?: string;       // required in UI
+  timeStart?: string;  // optional if isAllDay
+  timeEnd?: string;    // optional
 };
 
 type EventSubmitPayload = {
@@ -81,6 +69,7 @@ type EventSubmitPayload = {
   isAllDay: boolean;
   participatesInScheduling: boolean;
   isFixed: boolean;
+  transparency: "OPAQUE" | "TRANSPARENT" | null;
   status: "SCHEDULED" | "WAITLIST";
   tzid: string;
   calendarId?: string | null;
@@ -106,8 +95,8 @@ export type CreateModalSubmitPayload = EventSubmitPayload | RequestSubmitPayload
 type Props = {
   open: boolean;
   mode?: "create" | "edit";
-  initialTab?: "evento" | "solicitud";
-  initialValues?: Partial<EventForm | TaskForm | RequestForm>;
+  initialTab?: "evento" | "recordatorio";
+  initialValues?: Partial<EventForm & ReminderForm>;
   title?: string;
   onSubmit: (payload: CreateModalSubmitPayload) => void;
   onClose: () => void;
@@ -117,7 +106,7 @@ type Props = {
 const classNames = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 const card = "bg-white shadow-sm rounded-2xl border border-slate-200";
 const inputBase =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400";
+  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800F placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400";
 const labelBase = "inline-flex items-center gap-2 text-sm font-medium text-slate-700";
 const subtle = "text-slate-500 text-sm";
 const button =
@@ -256,14 +245,14 @@ const defaultRequest = (): RequestForm => ({
 });
 
 // “Map a Prisma-like payload”
-function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
+function mapEvent(f: EventForm, timeZone: string) {
   const startAt = dateAndTimeToDateLocal(f.date, f.timeStart, timeZone);
   const endAt = dateAndTimeToDateLocal(f.date, f.timeEnd, timeZone);
   const windowStartAt = f.window === "RANGO" ? dateStringToStartOfDay(f.windowStart, timeZone) : null;
   const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null;
   const isAllDay = Boolean(f.date && !f.timeStart && !f.timeEnd);
 
-  const base: EventSubmitPayload = {
+  const base: any = {
     kind: "EVENTO",
     title: f.title.trim(),
     description: f.description?.trim() || null,
@@ -274,16 +263,11 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
     windowStart: windowStartAt,
     windowEnd: windowEndAt,
     isAllDay,
-    start: startAt,
-    end: endAt,
-    participatesInScheduling: true,
-    isFixed: false,
-    status: "SCHEDULED",
     tzid: timeZone,
   };
 
   switch (f.priority) {
-    case "RECORDATORIO":
+    case "RECORDATORIO": {
       return {
         ...base,
         participatesInScheduling: false,
@@ -291,7 +275,10 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
         window: "NONE",
         windowStart: null,
         windowEnd: null,
+        start: startAt,
+        end: endAt,
       };
+    }
     case "OPCIONAL": {
       return {
         ...base,
@@ -304,20 +291,35 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
         end: null,
       };
     }
-    case "CRITICA":
+    case "CRITICA": {
       return {
         ...base,
         isFixed: true,
+        participatesInScheduling: true,
+        transparency: "OPAQUE",
+        start: startAt,
+        end: endAt,
       };
-    default:
-      return base;
+    }
+    default: {
+      return {
+        ...base,
+        isFixed: false,
+        participatesInScheduling: true,
+        transparency: "OPAQUE",
+        start: startAt,
+        end: endAt,
+      };
+    }
   }
 }
 
+  debugDateFull('mapReminder START', start);
+  debugDateFull('mapReminder END', end);
 
-function mapRequest(f: RequestForm, timeZone: string): RequestSubmitPayload {
+function mapRequest(f: RequestForm, timeZone: string) {
   return {
-    kind: "SOLICITUD",
+    kind: "RECORDATORIO",
     title: f.title.trim(),
     description: f.description?.trim() || null,
     category: f.category || null,
@@ -357,17 +359,29 @@ const Tabs: React.FC<{
   </div>
 );
 
-const CrearEvento: React.FC<{
-  initial?: Partial<EventForm>;
-  onSubmit: (data: EventSubmitPayload) => void;
-  timeZone: string;
-}> = ({
+const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: any) => void; timeZone: string }> = ({
   initial,
   onSubmit,
   timeZone,
 }) => {
   const initEvent = useMemo<EventForm>(() => ({ ...defaultEvent(), ...(initial ?? {}) }), [initial]);
   const [f, set] = useState<EventForm>(initEvent);
+
+  useEffect(() => {
+    if (initial?.date || initial?.timeStart) {
+      console.log('🔍 CrearEvento - Valores iniciales recibidos:', {
+        date: initial.date,
+        timeStart: initial.timeStart,
+        timeEnd: initial.timeEnd,
+        formState: {
+          date: f.date,
+          timeStart: f.timeStart,
+          timeEnd: f.timeEnd,
+        },
+      });
+    }
+  }, [initial?.date, initial?.timeStart, initial?.timeEnd]);
+
 
   const isCritica = f.priority === "CRITICA";
   const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
@@ -405,6 +419,7 @@ const CrearEvento: React.FC<{
             <option value="RECORDATORIO">Recordatorio</option>
           </Select>
         </Field>
+        <div />
       </Row>
 
       {isCritica && (
@@ -432,6 +447,7 @@ const CrearEvento: React.FC<{
                 <option value="YEARLY">Anual</option>
               </Select>
             </Field>
+            <div />
           </Row>
         </>
       )}
@@ -468,6 +484,123 @@ const CrearEvento: React.FC<{
                 <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
               </Field>
               <Field label="Hora fin (opcional)" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+            <div />
+          </Row>
+        </>
+      )}
+
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </div>
+          </Row>
+          <Row>
+            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+                <option value="NONE">No repetir</option>
+                <option value="DAILY">Diario</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="YEARLY">Anual</option>
+              </Select>
+            </Field>
+          </Row>
+        </>
+      )}
+
+      {isReminder && (
+        <>
+          <Row>
+            <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}> 
+              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
+                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin" labelIcon={<Clock className="h-4 w-4" />}>
                 <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
               </Field>
             </div>
@@ -530,16 +663,22 @@ const CrearEvento: React.FC<{
           Guardar
         </button>
       </div>
+      {process.env.NODE_ENV === 'development' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 font-mono">
+          <div>Fecha: {f.date || '(vacío)'}</div>
+          <div>Hora inicio: {f.timeStart || '(vacío)'}</div>
+          <div>Hora fin: {f.timeEnd || '(vacío)'}</div>
+        </div>
+      )}
     </div>
   );
 };
 
+const CrearRecordatorio: React.FC<{ initial?: Partial<ReminderForm>; onSubmit: (data: any) => void }> = ({ initial, onSubmit }) => {
+  const initReminder = useMemo<ReminderForm>(() => ({ ...defaultReminder(), ...(initial ?? {}) }), [initial]);
+  const [f, set] = useState<ReminderForm>(initReminder);
 
-const CrearSolicitud: React.FC<{
-  initial?: Partial<RequestForm>;
-  onSubmit: (data: RequestSubmitPayload) => void;
-  timeZone: string;
-}> = ({
+const CrearSolicitud: React.FC<{ initial?: Partial<RequestForm>; onSubmit: (data: any) => void; timeZone: string }> = ({
   initial,
   onSubmit,
   timeZone,
@@ -552,7 +691,7 @@ const CrearSolicitud: React.FC<{
     <div className="space-y-4">
       <Row>
         <Field label="Título" labelIcon={<TypeIcon className="h-4 w-4" />}>
-          <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Nombre de la solicitud" />
+          <Input value={f.title} onChange={(e) => set({ ...f, title: e.target.value })} placeholder="Ej. Reunión virtual, Cumpleaños, Nota" />
         </Field>
         <Field label="Categoría" labelIcon={<FolderOpen className="h-4 w-4" />}>
           <Select value={f.category ?? ""} onChange={(e) => set({ ...f, category: e.target.value })}>
@@ -563,48 +702,57 @@ const CrearSolicitud: React.FC<{
           </Select>
         </Field>
       </Row>
+
       <Field label="Descripción" labelIcon={<FileText className="h-4 w-4" />}>
         <Textarea value={f.description} onChange={(e) => set({ ...f, description: e.target.value })} placeholder="Opcional" />
       </Field>
+
       <Row>
-        <Field label="Disponibilidad" labelIcon={<CalendarRange className="h-4 w-4" />}>
-          <Select value={f.window} onChange={(e) => set({ ...f, window: e.target.value as AvailabilityWindow })}>
-            <option value="PRONTO">Pronto</option>
-            <option value="SEMANA">Esta semana</option>
-            <option value="MES">Este mes</option>
-            <option value="RANGO">Rango personalizado</option>
-            <option value="NONE">Sin preferencia</option>
-          </Select>
-        </Field>
-        {f.window === "RANGO" && (
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Inicio" labelIcon={<Calendar className="h-4 w-4" />}>
-              <Input type="date" value={f.windowStart} onChange={(e) => set({ ...f, windowStart: e.target.value })} />
-            </Field>
-            <Field label="Fin" labelIcon={<Calendar className="h-4 w-4" />}>
-              <Input type="date" value={f.windowEnd} onChange={(e) => set({ ...f, windowEnd: e.target.value })} />
-            </Field>
-          </div>
-        )}
-      </Row>
-      <Row>
-        <Field label="Fecha (opcional)" labelIcon={<Calendar className="h-4 w-4" />}>
+        <Field label="Fecha" labelIcon={<Calendar className="h-4 w-4" />}>
           <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Hora inicio (opcional)" labelIcon={<Clock className="h-4 w-4" />}>
+        <div className="flex items-end gap-3">
+          <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={f.isAllDay}
+              onChange={(e) => set({ ...f, isAllDay: e.target.checked })}
+            />
+            Todo el día
+          </label>
+        </div>
+      </Row>
+
+      {!f.isAllDay && (
+        <Row>
+          <Field label="Hora inicio" labelIcon={<Clock className="h-4 w-4" />}>
             <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
           </Field>
           <Field label="Hora fin (opcional)" labelIcon={<Clock className="h-4 w-4" />}>
             <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
           </Field>
-        </div>
+        </Row>
+      )}
+
+      <Row>
+        <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
+          <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
+            <option value="NONE">No repetir</option>
+            <option value="DAILY">Diario</option>
+            <option value="WEEKLY">Semanal</option>
+            <option value="MONTHLY">Mensual</option>
+            <option value="YEARLY">Anual</option>
+          </Select>
+        </Field>
+        <div />
       </Row>
-      <Field label="Link para compartir (obligatorio)" labelIcon={<LinkIcon className="h-4 w-4" />}>
-        <Input value={f.shareLink} onChange={(e) => set({ ...f, shareLink: e.target.value })} placeholder="https://…" />
-      </Field>
+
+      <p className={subtle}>
+        Los recordatorios pueden solaparse y no usan el motor de disponibilidad. Son notas visibles en el calendario.
+      </p>
+
       <div className="flex justify-end gap-2 pt-2">
-        <button className={button} type="button" onClick={() => set(initRequest)}>
+        <button className={button} type="button" onClick={() => set(initReminder)}>
           Limpiar
         </button>
         <button
@@ -630,7 +778,7 @@ export default function CreateEditModal({
   onSubmit,
   onClose,
 }: Props) {
-  const [tab, setTab] = useState<TabId>(initialTab);
+  const [tab, setTab] = useState<"evento" | "recordatorio">(initialTab);
   const derivedTitle = title ?? (mode === "edit" ? "Editar" : "Crear");
   const timeZone = useMemo(() => resolveBrowserTimezone(), []);
 
@@ -639,8 +787,7 @@ export default function CreateEditModal({
       <Tabs
         tabs={[
           { id: "evento", label: mode === "edit" ? "Editar Evento" : "Crear Evento" },
-        
-          { id: "solicitud", label: "Solicitud de disponibilidad" },
+          { id: "recordatorio", label: mode === "edit" ? "Editar Recordatorio" : "Crear Recordatorio" },
         ]}
         value={tab}
         onChange={(v) => setTab(v)}
@@ -654,9 +801,9 @@ export default function CreateEditModal({
         />
       )}
 
-      {tab === "solicitud" && (
-        <CrearSolicitud
-          initial={{ ...(initialValues ?? {}), kind: "SOLICITUD" }}
+      {tab === "recordatorio" && (
+        <CrearRecordatorio
+          initial={{ kind: "RECORDATORIO", ...(initialValues ?? {}) }}
           onSubmit={onSubmit}
           timeZone={timeZone}
         />

@@ -2,8 +2,6 @@ import ICAL from 'ical.js';
 import { prisma } from '@/lib/prisma';
 import type { Event as DbEvent } from '@prisma/client';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 type ImportMode = 'REMINDER' | 'SMART';
 
 export type ImportIcsOptions = {
