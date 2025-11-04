@@ -53,7 +53,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Optional, Set
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-
 from ortools.sat.python import cp_model
 
 # -----------------------------
