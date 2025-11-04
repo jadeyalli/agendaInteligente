@@ -204,11 +204,13 @@ export default function DashboardHomePage() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-10">
+          <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:pb-28">
             <Calendar onViewChange={(meta) => setCalMeta(meta)} />
           </main>
 
-          <footer className="mt-auto border-t border-slate-200/60 bg-[var(--surface)]/80 px-4 py-4 text-sm text-[var(--muted)]">
+          <footer
+            className="mt-auto border-t border-slate-200/60 bg-[var(--surface)]/80 px-4 py-4 text-sm text-[var(--muted)] lg:fixed lg:bottom-0 lg:left-0 lg:right-0 lg:z-30 lg:mt-0"
+          >
             <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="font-medium">{new Date().getFullYear()} · Agenda Inteligente</span>
               <span className="text-xs uppercase tracking-[0.24em] text-slate-400">Organiza tu día con claridad</span>
