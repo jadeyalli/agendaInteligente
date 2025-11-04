@@ -72,9 +72,11 @@ export default function DashboardHomePage() {
     ].join(' ');
 
   const sidebarDesktopClass = [
-    'hidden lg:flex lg:min-h-screen lg:flex-col lg:border-r lg:border-slate-200/70 lg:bg-[var(--surface)]/90 lg:px-6 lg:py-6 lg:shadow-sm',
-    'transition-[margin,width,opacity] duration-300 ease-in-out lg:overflow-hidden',
-    desktopCollapsed ? 'lg:w-0 lg:-ml-10 lg:opacity-0' : 'lg:w-72 lg:opacity-100',
+    'hidden lg:flex lg:min-h-screen lg:flex-col lg:border-r lg:border-slate-200/70 lg:bg-[var(--surface)]/90 lg:px-6 lg:pt-6 lg:pb-6 lg:shadow-sm',
+    'transition-[margin,width,opacity] duration-300 ease-in-out',
+    desktopCollapsed
+      ? 'lg:w-0 lg:-ml-10 lg:opacity-0 lg:overflow-hidden'
+      : 'lg:w-72 lg:opacity-100 lg:overflow-y-auto lg:pb-32',
   ].join(' ');
 
   return (
