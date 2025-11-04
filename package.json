@@ -19,10 +19,12 @@
     "ical.js": "^2.2.1",
     "lucide-react": "^0.545.0",
     "next": "15.5.4",
+    "next-auth": "file:packages/next-auth",
     "node-ical": "^0.21.0",
     "prisma": "^6.17.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-hook-form": "file:packages/react-hook-form",
     "zod": "^4.1.12"
   },
   "devDependencies": {
