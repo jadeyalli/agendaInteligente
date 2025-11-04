@@ -72,9 +72,11 @@ export default function DashboardHomePage() {
     ].join(' ');
 
   const sidebarDesktopClass = [
-    'hidden lg:flex lg:h-screen lg:flex-col lg:border-r lg:border-slate-200/70 lg:bg-[var(--surface)]/90 lg:px-6 lg:py-6 lg:shadow-sm',
-    'transition-[margin,width,opacity] duration-300 ease-in-out lg:overflow-hidden',
-    desktopCollapsed ? 'lg:w-0 lg:-ml-10 lg:opacity-0' : 'lg:w-72 lg:opacity-100',
+    'hidden lg:flex lg:min-h-screen lg:flex-col lg:border-r lg:border-slate-200/70 lg:bg-[var(--surface)]/90 lg:px-6 lg:pt-6 lg:pb-6 lg:shadow-sm',
+    'transition-[margin,width,opacity] duration-300 ease-in-out',
+    desktopCollapsed
+      ? 'lg:w-0 lg:-ml-10 lg:opacity-0 lg:overflow-hidden'
+      : 'lg:w-72 lg:opacity-100 lg:overflow-y-auto lg:pb-32',
   ].join(' ');
 
   return (
@@ -106,16 +108,6 @@ export default function DashboardHomePage() {
               ))}
             </nav>
 
-            <div className="mt-auto flex items-center justify-between rounded-xl border border-slate-200/60 bg-white/60 px-3 py-2 text-xs text-[var(--muted)] shadow-sm">
-              <span>Versión 1.0</span>
-              <button
-                type="button"
-                className="hidden text-sm font-medium text-slate-500 transition hover:text-slate-800 lg:inline-flex"
-                onClick={() => setDesktopCollapsed((prev) => !prev)}
-              >
-                {desktopCollapsed ? 'Mostrar' : 'Ocultar'}
-              </button>
-            </div>
           </div>
         </aside>
 
@@ -173,9 +165,14 @@ export default function DashboardHomePage() {
               </button>
 
               <div className="flex items-center gap-3">
-                <div className="hidden h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-sky-400 text-base font-semibold text-white shadow-sm lg:flex">
-                  AI
-                </div>
+                <button
+                  type="button"
+                  className="hidden h-10 w-10 items-center justify-center rounded-full border border-slate-200/70 bg-white/70 text-[var(--muted)] transition hover:text-[var(--fg)] lg:inline-flex"
+                  onClick={() => setDesktopCollapsed((prev) => !prev)}
+                  aria-label={desktopCollapsed ? 'Mostrar menú lateral' : 'Ocultar menú lateral'}
+                >
+                  {desktopCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+                </button>
                 <div>
                   <p className="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">Agenda Inteligente</p>
                   <p className="text-lg font-semibold leading-tight text-[var(--fg)]">Panel de organización</p>
@@ -186,14 +183,6 @@ export default function DashboardHomePage() {
                 <div className="hidden items-center rounded-full border border-slate-200/60 bg-white/70 px-3 py-1 text-xs font-medium text-[var(--muted)] shadow-sm sm:flex">
                   <span className="truncate">{calMeta.title || ' '}</span>
                 </div>
-                <button
-                  type="button"
-                  className="hidden h-10 w-10 items-center justify-center rounded-full border border-slate-200/70 bg-white/70 text-[var(--muted)] transition hover:text-[var(--fg)] lg:inline-flex"
-                  onClick={() => setDesktopCollapsed((prev) => !prev)}
-                  aria-label={desktopCollapsed ? 'Mostrar menú lateral' : 'Ocultar menú lateral'}
-                >
-                  {desktopCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-                </button>
                 <div className="relative">
                   <select
                     value={theme}
@@ -217,11 +206,13 @@ export default function DashboardHomePage() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-10">
+          <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:pb-28">
             <Calendar onViewChange={(meta) => setCalMeta(meta)} />
           </main>
 
-          <footer className="mt-auto border-t border-slate-200/60 bg-[var(--surface)]/80 px-4 py-4 text-sm text-[var(--muted)]">
+          <footer
+            className="mt-auto border-t border-slate-200/60 bg-[var(--surface)]/80 px-4 py-4 text-sm text-[var(--muted)] lg:fixed lg:bottom-0 lg:left-0 lg:right-0 lg:z-30 lg:mt-0"
+          >
             <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="font-medium">{new Date().getFullYear()} · Agenda Inteligente</span>
               <span className="text-xs uppercase tracking-[0.24em] text-slate-400">Organiza tu día con claridad</span>
