@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agenda Inteligente
 
-## Getting Started
+Aplicación Next.js para gestión de agendas inteligentes con autenticación basada en NextAuth y Prisma.
 
-First, run the development server:
+## Configuración
+
+### Variables de entorno
+Crea un archivo `.env.local` con al menos estas variables:
+
+- `DATABASE_URL`: cadena de conexión a la base de datos utilizada por Prisma.
+- `NEXTAUTH_SECRET`: cadena aleatoria utilizada para firmar las sesiones de NextAuth.
+
+Variables opcionales para poblar un usuario inicial mediante el seed:
+
+- `SEED_USER_EMAIL`: correo electrónico del usuario inicial.
+- `SEED_USER_PASSWORD`: contraseña en texto plano; el script generará el hash.
+- `SEED_USER_NAME`: nombre a mostrar (opcional).
+
+Para desarrollo local con SQLite puedes usar los siguientes valores:
+
+```bash
+DATABASE_URL="file:./prisma/dev.db"
+NEXTAUTH_SECRET="cambia-esto"
+```
+
+### Dependencias
+Instala las dependencias del proyecto:
+
+```bash
+npm install
+```
+
+### Migraciones de base de datos
+Ejecuta las migraciones de Prisma para sincronizar el esquema:
+
+```bash
+npx prisma migrate dev
+```
+
+### Datos iniciales
+Si definiste las variables `SEED_USER_*`, ejecuta el seed para crear el usuario base:
+
+```bash
+npx prisma db seed
+```
+
+### Desarrollo
+Inicia el servidor de desarrollo:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+La aplicación estará disponible en [http://localhost:3000](http://localhost:3000).
