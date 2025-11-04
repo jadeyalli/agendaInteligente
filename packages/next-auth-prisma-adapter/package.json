@@ -1,0 +1,15 @@
+{
+  "name": "@next-auth/prisma-adapter",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "peerDependencies": {
+    "next-auth": "*",
+    "@prisma/client": "*"
+  }
+}

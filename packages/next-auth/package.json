@@ -10,6 +10,10 @@
     "./react": {
       "types": "./dist/react.d.ts",
       "default": "./dist/react.js"
+    },
+    "./providers/credentials": {
+      "types": "./dist/providers/credentials.d.ts",
+      "default": "./dist/providers/credentials.js"
     }
   }
 }
