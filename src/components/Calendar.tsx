@@ -102,6 +102,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [view, setView] = useState<ViewId>('timeGridWeek');
   const [weekends, setWeekends] = useState(true);
   const [title, setTitle] = useState<string>('');
+  const [viewTransitioning, setViewTransitioning] = useState(false);
 
   const [openCreate, setOpenCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -376,7 +377,12 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   }, [rows, visibleRange, theme]);
 
   // Navegación
-  const changeView = (v: ViewId) => { setView(v); api()?.changeView(v); };
+  const changeView = (v: ViewId) => {
+    if (view === v) return;
+    setView(v);
+    setViewTransitioning(true);
+    api()?.changeView(v);
+  };
   const prev = () => api()?.prev();
   const next = () => api()?.next();
   const today = () => api()?.today();
@@ -384,162 +390,200 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   // Estilos botones
   const viewBtn = (active: boolean) =>
     [
-      'inline-flex items-center justify-center rounded-lg border px-3 py-1.5 text-sm font-medium transition',
+      'inline-flex items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium transition-all duration-200 ease-out',
       active
-        ? 'bg-[var(--fg)] text-[var(--bg)] border-[var(--fg)]'
-        : 'bg-[var(--surface)] text-[var(--fg)] border-slate-300 hover:bg-slate-100',
-    ].join(' ');
+        ? 'bg-slate-900 text-white shadow-sm'
+        : 'text-[var(--muted)] hover:text-[var(--fg)] hover:bg-slate-900/5',
+      active && viewTransitioning ? 'view-toggle-animate' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   const navBtn =
-    'inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium transition bg-[var(--surface)] text-[var(--fg)] hover:bg-slate-100';
+    'inline-flex items-center justify-center rounded-full border border-slate-200/70 bg-white/70 px-4 py-1.5 text-sm font-medium text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white';
   const arrowBtn =
-    'inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium transition bg-[var(--surface)] text-[var(--fg)] hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/30';
+    'inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200/70 bg-white/70 text-sm font-medium text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30';
+
+  useEffect(() => {
+    if (!viewTransitioning) return;
+    const handle = window.setTimeout(() => setViewTransitioning(false), 320);
+    return () => window.clearTimeout(handle);
+  }, [viewTransitioning]);
+
+  useEffect(() => {
+    api()?.updateSize();
+  }, [view, weekends, visibleRange]);
+
+  const toolbarOffset = 'calc(var(--app-header-height, 72px) + 1rem)';
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]" style={{ fontFamily: 'Inter, ui-sans-serif, system-ui' }}>
-      <div className="mx-auto max-w-6xl px-6 py-8">
-        {/* Toolbar */}
-        <header className="mb-4 flex flex-col gap-3 sm:mb-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {/* IZQUIERDA */}
-            <div className="flex items-center gap-3">
-              <button className={navBtn} type="button" onClick={today}>Hoy</button>
-              <div className="text-base font-semibold text-[var(--fg)]">{title || ' '}</div>
+    <div className="flex h-full flex-col gap-6">
+      <header
+        className="calendar-toolbar sticky z-30 rounded-3xl border border-slate-200/70 bg-[var(--surface)]/80 px-4 py-4 shadow-sm backdrop-blur"
+        style={{ top: toolbarOffset }}
+      >
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <button className={navBtn} type="button" onClick={today}>
+              Hoy
+            </button>
+            <div className="text-base font-semibold text-[var(--fg)] sm:text-lg">{title || ' '}</div>
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.3em] text-[var(--muted)]">
+              <span>Vista</span>
+              <span className="h-1 w-8 rounded-full bg-slate-200" />
             </div>
+            <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 p-1 shadow-inner">
+              <button className={viewBtn(view === 'timeGridDay')} onClick={() => changeView('timeGridDay')} type="button">
+                Día
+              </button>
+              <button className={viewBtn(view === 'timeGridWeek')} onClick={() => changeView('timeGridWeek')} type="button">
+                Semana
+              </button>
+              <button className={viewBtn(view === 'dayGridMonth')} onClick={() => changeView('dayGridMonth')} type="button">
+                Mes
+              </button>
+              <button className={viewBtn(view === 'multiMonthYear')} onClick={() => changeView('multiMonthYear')} type="button">
+                Año
+              </button>
+            </div>
+          </div>
 
-            {/* DERECHA */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 text-[var(--fg)]">
-                <button className={viewBtn(view === 'timeGridDay')} onClick={() => changeView('timeGridDay')} type="button">Día</button>
-                <button className={viewBtn(view === 'timeGridWeek')} onClick={() => changeView('timeGridWeek')} type="button">Semana</button>
-                <button className={viewBtn(view === 'dayGridMonth')} onClick={() => changeView('dayGridMonth')} type="button">Mes</button>
-                <button className={viewBtn(view === 'multiMonthYear')} onClick={() => changeView('multiMonthYear')} type="button">Año</button>
-              </div>
-
-              {/* Flechas */}
-              <div className="flex items-center gap-2">
-                <button className={arrowBtn} type="button" onClick={prev}>◀</button>
-                <button className={arrowBtn} type="button" onClick={next}>▶</button>
-              </div>
-
-              {/* Toggle fines de semana */}
-              <label className="relative inline-flex select-none items-center gap-2 pl-2">
-                <span className="text-sm text-[var(--fg)]">Fines de semana</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-3 py-1 text-sm font-medium text-[var(--muted)] shadow-sm">
+              <span>Fines de semana</span>
+              <label className="relative inline-flex h-6 w-11 items-center">
                 <input
                   type="checkbox"
                   className="peer sr-only"
                   checked={weekends}
                   onChange={(e) => setWeekends(e.target.checked)}
                 />
-                <span className="relative h-6 w-10 rounded-full bg-slate-300 transition-colors peer-checked:bg-blue-600">
-                  <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
-                </span>
+                <span className="absolute inset-0 rounded-full bg-slate-300 transition peer-checked:bg-indigo-500" />
+                <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
               </label>
+            </div>
 
-              {/* Crear */}
-              <button
-                className="ml-2 inline-flex items-center rounded-xl bg-[var(--fg)] px-4 py-2 text-[var(--bg)] transition hover:opacity-90 disabled:opacity-60"
-                onClick={() => setOpenCreate(true)}
-                type="button"
-                disabled={creating}
-              >
-                {creating ? 'Creando…' : 'Crear'}
+            <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-2 py-1 shadow-sm">
+              <button className={arrowBtn} type="button" onClick={prev} aria-label="Vista anterior">
+                ◀
               </button>
-              <button
-                className="ml-2 inline-flex items-center rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-2 text-[var(--fg)] hover:bg-slate-100"
-                onClick={() => setOpenImport(true)}
-                type="button"
-              >
-                Importar .ICS
+              <button className={arrowBtn} type="button" onClick={next} aria-label="Vista siguiente">
+                ▶
               </button>
             </div>
+
+            <button
+              className="inline-flex items-center rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-60"
+              onClick={() => setOpenCreate(true)}
+              type="button"
+              disabled={creating}
+            >
+              {creating ? 'Creando…' : 'Crear evento'}
+            </button>
+            <button
+              className="inline-flex items-center rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+              onClick={() => setOpenImport(true)}
+              type="button"
+            >
+              Importar .ICS
+            </button>
           </div>
-        </header>
-
-        {/* Calendario */}
-        <div className="rounded-2xl border border-slate-200 bg-[var(--surface)] p-3 sm:p-4 shadow-sm">
-          <FullCalendar
-            ref={calendarRef}
-            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin]}
-            locales={[esLocale]}
-            locale="es"
-            initialView={view}
-            headerToolbar={false}
-            weekends={weekends}
-            navLinks
-            nowIndicator
-            expandRows
-            stickyHeaderDates
-            height="auto"
-            slotDuration="00:30:00"
-            slotMinTime="05:00:00"
-            slotMaxTime="23:00:00"
-            allDaySlot
-            selectable
-            selectMirror
-            editable={false}
-            views={{
-              dayGridMonth: { dayMaxEventRows: 5 },
-              multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
-            }}
-            dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
-            slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
-            weekNumberCalculation="ISO"
-
-            events={fcEvents}
-
-            eventClick={(info) => {
-              const raw = info.event.extendedProps?.raw as PreviewRow | undefined;
-              if (!raw) return;
-              setSelected(raw);
-              setOpenPreview(true);
-            }}
-            dateClick={(arg) => {
-              api()?.changeView('timeGridDay', arg.date);
-              setView('timeGridDay');
-            }}
-            navLinkDayClick={(date) => {
-              api()?.changeView('timeGridDay', date);
-              setView('timeGridDay');
-            }}
-            datesSet={({ view: v, start, end }) => {
-              const vtype = v.type as ViewId;
-              const newTitle = v.title;
-              const startMs = start.getTime();
-              const endMs = end.getTime();
-
-              const last = lastMetaRef.current;
-              const changed =
-                !last ||
-                last.view !== vtype ||
-                last.title !== newTitle ||
-                last.startMs !== startMs ||
-                last.endMs !== endMs;
-
-              if (!changed) return;
-
-              setTitle(newTitle);
-              onViewChange?.({ view: vtype, title: newTitle, start, end });
-              setVisibleRange({ start, end });
-
-              lastMetaRef.current = { view: vtype, title: newTitle, startMs, endMs };
-            }}
-
-            eventContent={(arg) => {
-              const timeText = arg.timeText ? `${arg.timeText} ` : '';
-              return (
-                <div className="truncate text-xs sm:text-[13px] font-medium text-[var(--fg)]">
-                  <span className="text-[var(--muted)]">{timeText}</span>
-                  <span>{arg.event.title}</span>
-                </div>
-              );
-            }}
-            dayCellDidMount={(info) => {
-              if (info.isToday) info.el.classList.add('fc-is-today-strong');
-            }}
-          />
-          {loading ? <div className="mt-2 text-sm text-[var(--muted)]">Cargando eventos…</div> : null}
         </div>
+      </header>
+
+      <div className="relative flex-1 overflow-hidden rounded-3xl border border-slate-200/70 bg-[var(--surface)]/90 shadow-sm">
+        <div className="relative h-full overflow-hidden">
+          <div className="h-full overflow-y-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
+            <div className={['px-2 pb-4 pt-3 sm:px-4', viewTransitioning ? 'calendar-fade' : ''].join(' ')}>
+              <FullCalendar
+                ref={calendarRef}
+                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin]}
+                locales={[esLocale]}
+                locale="es"
+                initialView={view}
+                headerToolbar={false}
+                weekends={weekends}
+                navLinks
+                nowIndicator
+                expandRows
+                stickyHeaderDates
+                height="auto"
+                slotDuration="00:30:00"
+                slotMinTime="05:00:00"
+                slotMaxTime="23:00:00"
+                allDaySlot
+                selectable
+                selectMirror
+                editable={false}
+                views={{
+                  dayGridMonth: { dayMaxEventRows: 5 },
+                  multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
+                }}
+                dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
+                slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+                weekNumberCalculation="ISO"
+
+                events={fcEvents}
+
+                eventClick={(info) => {
+                  const raw = info.event.extendedProps?.raw as PreviewRow | undefined;
+                  if (!raw) return;
+                  setSelected(raw);
+                  setOpenPreview(true);
+                }}
+                dateClick={(arg) => {
+                  api()?.changeView('timeGridDay', arg.date);
+                  setView('timeGridDay');
+                }}
+                navLinkDayClick={(date) => {
+                  api()?.changeView('timeGridDay', date);
+                  setView('timeGridDay');
+                }}
+                datesSet={({ view: v, start, end }) => {
+                  const vtype = v.type as ViewId;
+                  const newTitle = v.title;
+                  const startMs = start.getTime();
+                  const endMs = end.getTime();
+
+                  const last = lastMetaRef.current;
+                  const changed =
+                    !last ||
+                    last.view !== vtype ||
+                    last.title !== newTitle ||
+                    last.startMs !== startMs ||
+                    last.endMs !== endMs;
+
+                  if (!changed) return;
+
+                  setTitle(newTitle);
+                  onViewChange?.({ view: vtype, title: newTitle, start, end });
+                  setVisibleRange({ start, end });
+
+                  lastMetaRef.current = { view: vtype, title: newTitle, startMs, endMs };
+                }}
+
+                eventContent={(arg) => {
+                  const timeText = arg.timeText ? `${arg.timeText} ` : '';
+                  return (
+                    <div className="truncate text-xs font-medium text-[var(--fg)] sm:text-[13px]">
+                      <span className="text-[var(--muted)]">{timeText}</span>
+                      <span>{arg.event.title}</span>
+                    </div>
+                  );
+                }}
+                dayCellDidMount={(info) => {
+                  if (info.isToday) info.el.classList.add('fc-is-today-strong');
+                }}
+              />
+            </div>
+          </div>
+        </div>
+        {loading ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center text-xs font-medium text-[var(--muted)]">
+            Cargando eventos…
+          </div>
+        ) : null}
       </div>
+
 
       {/* Modal Crear */}
       <CreateEditModal
