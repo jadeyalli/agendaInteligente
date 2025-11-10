@@ -1,5 +1,6 @@
 import ICAL from 'ical.js';
 import { prisma } from '@/lib/prisma';
+import { generateRandomPasswordHash } from '@/lib/auth';
 import type { Event as DbEvent } from '@prisma/client';
 
 type ImportMode = 'REMINDER' | 'SMART';
@@ -108,7 +109,9 @@ function allDayBoundsFromDate(start: Date, durationMs: number): { start: Date; e
 async function ensureUserAndCalendar(email: string, calendarName: string) {
     const user =
         (await prisma.user.findUnique({ where: { email } })) ??
-        (await prisma.user.create({ data: { email, name: 'Importado' } }));
+        (await prisma.user.create({
+            data: { email, name: 'Importado', password: generateRandomPasswordHash() },
+        }));
 
     const calendar =
         (await prisma.calendar.findFirst({
