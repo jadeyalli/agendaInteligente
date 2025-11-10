@@ -108,6 +108,35 @@ def day_index(dt: datetime) -> Tuple[int, int, int]:
     return (dt.year, dt.month, dt.day)
 
 
+def parse_hhmm(value: Any, default: Tuple[int, int]) -> Tuple[int, int]:
+    try:
+        if isinstance(value, str):
+            parts = value.strip().split(":")
+            if len(parts) >= 2:
+                h = int(parts[0])
+                m = int(parts[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    return (h, m)
+        elif isinstance(value, (tuple, list)) and len(value) >= 2:
+            h = int(value[0])
+            m = int(value[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return (h, m)
+    except (ValueError, TypeError):
+        pass
+    return default
+
+
+def safe_positive_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        n = int(value)
+        return max(0, n)
+    except (ValueError, TypeError):
+        return default
+
+
 # =============================
 # Estructuras de eventos
 # =============================
@@ -197,7 +226,9 @@ def expand_window_slots(ev: FlexibleEvent, horizon: Horizon, now_slot: int) -> r
     return range(0, horizon.total_slots)
 
 
-def remove_conflicting_starts(starts: List[int], dur: int, fixed: List[FixedEvent]) -> List[int]:
+def remove_conflicting_starts(
+    starts: List[int], dur: int, fixed: List[FixedEvent], buffer_slots: int = 0
+) -> List[int]:
     """
     Filtra starts que chocarían con intervalos fijos que SI bloquean capacidad.
     """
@@ -205,12 +236,16 @@ def remove_conflicting_starts(starts: List[int], dur: int, fixed: List[FixedEven
         return starts
     out = []
     for s in starts:
-        e = s + dur
+        event_start = s
+        event_end = s + dur
         conflict = False
         for f in fixed:
             if not f.blocks_capacity:
                 continue
-            if not (e <= f.start_slot or s >= f.end_slot):
+            if not (
+                event_end + buffer_slots <= f.start_slot
+                or event_start >= f.end_slot + buffer_slots
+            ):
                 conflict = True
                 break
         if not conflict:
@@ -262,9 +297,27 @@ def build_debug_info(payload: Dict[str, Any],
     end_dt = parse_iso_localized(h["end"], tz)
     horizon = Horizon(tz=tz, start_dt=start_dt, end_dt=end_dt, slot_minutes=slot_minutes)
 
+    policy = payload.get("policy", {})
+    allowed_days = set()
+    for d in policy.get("activeDays", []):
+        try:
+            val = int(d)
+            if 0 <= val <= 6:
+                allowed_days.add(val)
+        except (TypeError, ValueError):
+            continue
+    if not allowed_days:
+        allowed_days = set(range(7))
+
+    day_start_tuple = parse_hhmm(policy.get("dayStart"), (9, 0))
+    day_end_tuple = parse_hhmm(policy.get("dayEnd"), (18, 0))
+    buffer_minutes = safe_positive_int(policy.get("eventBufferMinutes"), 0)
+    buffer_slots = math.ceil(buffer_minutes / slot_minutes) if buffer_minutes else 0
+    lead_minutes = safe_positive_int(policy.get("schedulingLeadMinutes"), 0)
+
     # now_slot: para PRONTO y distancia
     now_local = datetime.now(tz)
-    now_slot = max(0, horizon.dt_to_next_slot(now_local))
+    now_slot = max(0, horizon.dt_to_next_slot(now_local + timedelta(minutes=lead_minutes)))
 
     # preferred slots: igual que en el solver
     preferred_ranges = payload.get("availability", {}).get("preferred", [])
@@ -275,20 +328,26 @@ def build_debug_info(payload: Dict[str, Any],
             b = parse_iso_localized(r["end"], tz)
             preferred_slots.update(horizon.slots_in_interval(a, b))
     else:
-        # fallback simple de horario laboral
         cur = horizon.start_dt
         while cur < horizon.end_dt:
-            dow = cur.weekday()  # 0=Mon..6=Sun
-            if dow < 5:
-                a = cur.replace(hour=9, minute=0, second=0, microsecond=0)
-                b = cur.replace(hour=18, minute=0, second=0, microsecond=0)
-            elif dow == 5:
-                a = cur.replace(hour=10, minute=0, second=0, microsecond=0)
-                b = cur.replace(hour=14, minute=0, second=0, microsecond=0)
-            else:
-                a = cur.replace(hour=0, minute=0, second=0, microsecond=0)
-                b = cur.replace(hour=0, minute=0, second=0, microsecond=0)  # domingo sin preferencia
-            preferred_slots.update(horizon.slots_in_interval(a, b))
+            dow = cur.weekday()
+            if dow in allowed_days:
+                a = cur.replace(
+                    hour=day_start_tuple[0],
+                    minute=day_start_tuple[1],
+                    second=0,
+                    microsecond=0
+                )
+                b = cur.replace(
+                    hour=day_end_tuple[0],
+                    minute=day_end_tuple[1],
+                    second=0,
+                    microsecond=0
+                )
+                if b <= a:
+                    a = cur.replace(hour=0, minute=0, second=0, microsecond=0)
+                    b = (a + timedelta(days=1))
+                preferred_slots.update(horizon.slots_in_interval(a, b))
             cur = (cur + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Fixed events (igual que en el solver)
@@ -314,9 +373,7 @@ def build_debug_info(payload: Dict[str, Any],
             )
         ))
 
-    # Política
-    policy = payload.get("policy", {})
-    allow_weekend: bool = bool(policy.get("allowWeekend", False))
+    # Política ya procesada arriba
 
     # Pesos (igual que solver)
     weights = payload["weights"]
@@ -381,14 +438,16 @@ def build_debug_info(payload: Dict[str, Any],
                 preferred_starts.append(s)
         return preferred_starts if preferred_starts else starts
 
-    def filter_weekends(starts: List[int], dur: int) -> List[int]:
-        if allow_weekend:
+    def filter_allowed_days(starts: List[int], dur: int) -> List[int]:
+        if len(allowed_days) >= 7:
             return starts
         out = []
         for s in starts:
             st = horizon.slot_to_dt(s)
             en = horizon.slot_to_dt(s + dur - 1)
-            if is_weekend(st) or is_weekend(en):
+            if st.weekday() not in allowed_days:
+                continue
+            if en.weekday() not in allowed_days:
                 continue
             out.append(s)
         return out
@@ -399,22 +458,23 @@ def build_debug_info(payload: Dict[str, Any],
 
     for e in flex:
         base_range = list(expand_window_slots(e, horizon, now_slot))
+        buffer_for_event = buffer_slots if not e.overlap else 0
 
         # asegurar que quepa completo: último inicio posible = end - dur
-        latest_start = horizon.total_slots - e.duration_slots
+        latest_start = horizon.total_slots - (e.duration_slots + buffer_for_event)
         if latest_start < 0:
             candidates[e.id] = []
             continue
         base_range = [s for s in base_range if 0 <= s <= latest_start]
 
         # política de fines de semana
-        base_range = filter_weekends(base_range, e.duration_slots)
+        base_range = filter_allowed_days(base_range, e.duration_slots)
 
         starts = base_range
 
         # si no puede solaparse, remover choque con fijos
         if not e.overlap and fixed_blocking:
-            starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking)
+            starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking, buffer_for_event)
 
         # restringir a preferidos si hay opción
         starts = filter_to_preferred_if_possible(starts, e.duration_slots)
