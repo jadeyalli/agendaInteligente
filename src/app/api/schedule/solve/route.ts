@@ -1,6 +1,7 @@
 // app/api/schedule/solve/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { createRandomPasswordHash } from '@/lib/auth';
 import { AvailabilityWindow, Priority } from '@prisma/client';
 import { spawn } from 'child_process';
 
@@ -162,7 +163,11 @@ export async function POST(req: Request) {
     // Si no trae "new", solo re-optimiza lo existente.
     const email = 'demo@local';
     let user = await prisma.user.findUnique({ where: { email } });
-    if (!user) user = await prisma.user.create({ data: { email, name: 'Demo' } });
+    if (!user) {
+      user = await prisma.user.create({
+        data: { email, name: 'Demo', password: createRandomPasswordHash() },
+      });
+    }
 
     const extraNew = Array.isArray(body?.new) ? body.new : [];
     const payload = await buildPayloadForUser(user.id, extraNew);

@@ -79,6 +79,7 @@ enum ICalTodoStatus {
 model User {
   id        String             @id @default(cuid())
   email     String             @unique
+  password  String
   name      String?
   events    Event[]
   slots     AvailabilitySlot[]
