@@ -1,6 +1,6 @@
 import ICAL from 'ical.js';
 import { prisma } from '@/lib/prisma';
-import { createRandomPasswordHash } from '@/lib/auth';
+import { generateRandomPasswordHash } from '@/lib/auth';
 import type { Event as DbEvent } from '@prisma/client';
 
 type ImportMode = 'REMINDER' | 'SMART';
@@ -110,7 +110,7 @@ async function ensureUserAndCalendar(email: string, calendarName: string) {
     const user =
         (await prisma.user.findUnique({ where: { email } })) ??
         (await prisma.user.create({
-            data: { email, name: 'Importado', password: createRandomPasswordHash() },
+            data: { email, name: 'Importado', password: generateRandomPasswordHash() },
         }));
 
     const calendar =

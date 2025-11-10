@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { createRandomPasswordHash } from '@/lib/auth';
+import { generateRandomPasswordHash } from '@/lib/auth';
 import {
   AvailabilityWindow,
   Priority,
@@ -284,7 +284,7 @@ async function ensureDemoUser() {
   let user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
     user = await prisma.user.create({
-      data: { email, name: 'Demo', password: createRandomPasswordHash() },
+      data: { email, name: 'Demo', password: generateRandomPasswordHash() },
     });
   }
   return user;
