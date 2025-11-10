@@ -1,0 +1,87 @@
+{
+  "user": {
+    "id": "user_001",
+    "timezone": "America/Mexico_City"
+  },
+  "horizon": {
+    "start": "2025-11-03T00:00:00-06:00",
+    "end": "2025-11-10T00:00:00-06:00",
+    "slotMinutes": 30
+  },
+  "availability": {
+    "preferred": [],
+    "fallbackUsed": true
+  },
+  "events": {
+    "fixed": [
+      {
+        "id": "reunion_critica",
+        "start": "2025-11-04T10:00:00-06:00",
+        "end": "2025-11-04T11:00:00-06:00",
+        "isInPerson": true,
+        "canOverlap": false,
+        "blocksCapacity": true
+      }
+    ],
+    "movable": [
+      {
+        "id": "tarea_urgente_reagendar",
+        "priority": "UnI",
+        "durationMin": 60,
+        "isInPerson": true,
+        "canOverlap": false,
+        "currentStart": "2025-11-04T10:00:00-06:00",
+        "window": "SEMANA",
+        "windowStart": null,
+        "windowEnd": null
+      },
+      {
+        "id": "tarea_relevante_mantener",
+        "priority": "InU",
+        "durationMin": 90,
+        "isInPerson": false,
+        "canOverlap": true,
+        "currentStart": "2025-11-05T16:00:00-06:00",
+        "window": "SEMANA",
+        "windowStart": null,
+        "windowEnd": null
+      }
+    ],
+    "new": [
+      {
+        "id": "nueva_tarea_plan",
+        "priority": "InU",
+        "durationMin": 60,
+        "isInPerson": false,
+        "canOverlap": true,
+        "window": "RANGO",
+        "windowStart": "2025-11-06T09:00:00-06:00",
+        "windowEnd": "2025-11-07T18:00:00-06:00"
+      }
+    ],
+    "newFixed": []
+  },
+  "weights": {
+    "move": {
+      "UnI": 20,
+      "InU": 10
+    },
+    "distancePerSlot": {
+      "UnI": 4,
+      "InU": 1
+    },
+    "offPreferencePerSlot": {
+      "UnI": 1,
+      "InU": 3
+    },
+    "crossDayPerEvent": {
+      "UnI": 2,
+      "InU": 1
+    }
+  },
+  "policy": {
+    "allowWeekend": false,
+    "noOverlapCapacity": 1,
+    "remoteCapacity": 9999
+  }
+}
