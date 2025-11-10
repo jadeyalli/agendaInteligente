@@ -2,7 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Before starting the development server for the first time, create the local SQLite database and apply the Prisma migrations:
+
+```bash
+npm run db:prepare
+```
+
+Then run the development server:
 
 ```bash
 npm run dev
