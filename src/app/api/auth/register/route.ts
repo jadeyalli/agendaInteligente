@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 import { prisma } from '@/lib/prisma';
 import { hashPassword, validateEmail, validatePassword } from '@/lib/auth';
@@ -45,7 +46,15 @@ export async function POST(request: Request) {
     },
   });
 
-  const response = NextResponse.json({
+  const cookieStore = cookies();
+  cookieStore.set('sessionUser', user.id, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+  });
+
+  return NextResponse.json({
     message: 'Cuenta creada correctamente.',
     user: {
       id: user.id,
@@ -54,13 +63,4 @@ export async function POST(request: Request) {
       calendarIds: user.calendars.map((calendar) => calendar.id),
     },
   });
-
-  response.cookies.set('sessionUser', user.id, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-  });
-
-  return response;
 }

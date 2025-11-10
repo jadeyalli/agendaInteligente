@@ -9,11 +9,6 @@ export function hashPassword(password: string) {
   return `${salt}:${hash}`;
 }
 
-export function generateRandomPasswordHash() {
-  const placeholderPassword = randomBytes(SALT_LENGTH).toString('hex');
-  return hashPassword(placeholderPassword);
-}
-
 export function verifyPassword(password: string, storedHash: string) {
   const [salt, originalHash] = storedHash.split(':');
   if (!salt || !originalHash) {

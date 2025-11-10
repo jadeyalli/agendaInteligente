@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 import { prisma } from '@/lib/prisma';
 import { validateEmail, validatePassword, verifyPassword } from '@/lib/auth';
@@ -36,7 +37,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: 'Credenciales inválidas.' }, { status: 401 });
   }
 
-  const response = NextResponse.json({
+  const cookieStore = cookies();
+  cookieStore.set('sessionUser', user.id, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+  });
+
+  return NextResponse.json({
     message: 'Inicio de sesión exitoso.',
     user: {
       id: user.id,
@@ -45,13 +54,4 @@ export async function POST(request: Request) {
       calendarIds: user.calendars.map((calendar) => calendar.id),
     },
   });
-
-  response.cookies.set('sessionUser', user.id, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-  });
-
-  return response;
 }
