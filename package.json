@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "db:prepare": "prisma migrate deploy || prisma db push",
+    "predev": "npm run db:prepare",
+    "prestart": "npm run db:prepare",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "studio": "npm run db:prepare && prisma studio",
     "lint": "eslint"
   },
   "dependencies": {
