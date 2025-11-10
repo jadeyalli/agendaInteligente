@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { generateRandomPasswordHash } from '@/lib/auth';
+import { getSessionUser } from '@/lib/session';
 import {
   AvailabilityWindow,
   Priority,
@@ -63,6 +63,10 @@ function coerceBoolean(value: unknown): boolean | undefined {
     if (normalized === 'false') return false;
   }
   return undefined;
+}
+
+function unauthorized() {
+  return NextResponse.json({ error: 'No autenticado.' }, { status: 401 });
 }
 
 function sanitizeEventPayload(
@@ -153,8 +157,13 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'Missing id' }, { status: 400 });
     }
 
+    const user = await getSessionUser();
+    if (!user) {
+      return unauthorized();
+    }
+
     const target = await prisma.event.findUnique({ where: { id } });
-    if (!target) {
+    if (!target || target.userId !== user.id) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
@@ -162,7 +171,10 @@ export async function DELETE(req: Request) {
       // si es master, borra master + hijas; si es hija, borra su master y la serie
       const masterId = target.originEventId ?? target.id;
       await prisma.event.deleteMany({
-        where: { OR: [{ id: masterId }, { originEventId: masterId }] },
+        where: {
+          userId: user.id,
+          OR: [{ id: masterId }, { originEventId: masterId }],
+        },
       });
       return NextResponse.json({ ok: true, deleted: 'series' });
     }
@@ -211,6 +223,16 @@ export async function PATCH(req: Request) {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+    const user = await getSessionUser();
+    if (!user) {
+      return unauthorized();
+    }
+
+    const existing = await prisma.event.findUnique({ where: { id } });
+    if (!existing || existing.userId !== user.id) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
 
     const raw = await req.json().catch(() => ({}));
     const sanitized = sanitizeEventPayload(raw);
@@ -277,18 +299,6 @@ export async function PATCH(req: Request) {
   }
 }
 
-
-/** Usuario demo */
-async function ensureDemoUser() {
-  const email = 'demo@local';
-  let user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    user = await prisma.user.create({
-      data: { email, name: 'Demo', password: generateRandomPasswordHash() },
-    });
-  }
-  return user;
-}
 
 /** Zod comunes */
 const zDate = z.union([z.coerce.date(), z.null(), z.undefined()]);
@@ -1185,11 +1195,39 @@ export async function POST(req: Request) {
     }
 
     const data = parsed.data;
-    const user = await ensureDemoUser();
+    const user = await getSessionUser();
+    if (!user) {
+      return unauthorized();
+    }
+
+    const requestedCalendarId =
+      typeof data.calendarId === 'string' && data.calendarId.trim() ? data.calendarId.trim() : null;
+
+    let calendarIdToUse: string | null = null;
+    if (requestedCalendarId) {
+      const calendar = await prisma.calendar.findFirst({ where: { id: requestedCalendarId, userId: user.id } });
+      if (!calendar) {
+        return NextResponse.json({ error: 'Calendario no válido.' }, { status: 400 });
+      }
+      calendarIdToUse = calendar.id;
+    } else {
+      let calendar = await prisma.calendar.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (!calendar) {
+        calendar = await prisma.calendar.create({
+          data: { userId: user.id, name: 'Calendario principal', color: '#6366F1' },
+        });
+      }
+
+      calendarIdToUse = calendar.id;
+    }
 
     let items: Event[];
     if (data.kind === 'EVENTO') {
-      const normalized = applyPriorityPolicyToEventCreate(data);
+      const normalized = applyPriorityPolicyToEventCreate({ ...data, calendarId: calendarIdToUse });
       const created = await createEventSeries(user.id, normalized);
       await scheduleFlexibleEvents(user.id, created);
       const createdIds = created.map((item) => item.id);
@@ -1199,9 +1237,9 @@ export async function POST(req: Request) {
       const byId = new Map(refreshed.map((item) => [item.id, item]));
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
     } else if (data.kind === 'TAREA') {
-      items = await createTaskSeries(user.id, data);
+      items = await createTaskSeries(user.id, { ...data, calendarId: calendarIdToUse });
     } else if (data.kind === 'RECORDATORIO') {
-      items = await createReminderSeries(user.id, data);
+      items = await createReminderSeries(user.id, { ...data, calendarId: calendarIdToUse });
     } else {
       throw new Error('Invalid event kind');
     }
@@ -1216,13 +1254,29 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const scope = searchParams.get('scope') ?? 'user';
+    const user = await getSessionUser();
+    if (!user) {
+      return unauthorized();
+    }
 
-    const where: Prisma.EventWhereInput = {};
-    if (scope === 'user') {
-      const demo = await prisma.user.findUnique({ where: { email: 'demo@local' } });
-      if (demo) where.userId = demo.id;
+    const { searchParams } = new URL(req.url);
+    const calendarFilter = searchParams.get('calendarId');
+
+    const where: Prisma.EventWhereInput = { userId: user.id };
+
+    if (calendarFilter && calendarFilter !== 'all') {
+      if (calendarFilter === 'none') {
+        where.calendarId = null;
+      } else {
+        const trimmed = calendarFilter.trim();
+        if (trimmed) {
+          const calendar = await prisma.calendar.findFirst({ where: { id: trimmed, userId: user.id } });
+          if (!calendar) {
+            return NextResponse.json({ error: 'Calendario no encontrado' }, { status: 404 });
+          }
+          where.calendarId = trimmed;
+        }
+      }
     }
 
     const rows = await prisma.event.findMany({
