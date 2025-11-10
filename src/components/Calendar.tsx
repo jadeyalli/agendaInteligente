@@ -142,7 +142,11 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   async function loadEvents() {
     try {
       setLoading(true);
-      const res = await fetch('/api/events?scope=all', { cache: 'no-store' });
+      const res = await fetch('/api/events', { cache: 'no-store' });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       if (!res.ok) throw new Error('No se pudieron cargar los eventos');
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
@@ -162,6 +166,10 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       const res = await fetch('/api/events', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo crear');
@@ -186,6 +194,10 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo actualizar');
@@ -206,6 +218,10 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     try {
       setDeleting(true);
       const res = await fetch(`/api/events?id=${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo eliminar');
@@ -225,20 +241,6 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   // Si es TAREA
   if (row.kind === 'TAREA') {
     return null;
-  }
-
-  if (row.kind === 'RECORDATORIO' || row.priority === 'RECORDATORIO') {
-    const startDate = row.start ? isoToDate(row.start) : null;
-    const endDate = row.end ? isoToDate(row.end) : null;
-
-    return {
-      kind: 'RECORDATORIO',
-      title: row.title,
-      description: row.description ?? '',
-      category: row.category ?? '',
-      repeat: 'NONE',
-      dueDate: dateToDateStringLocal(dueDate, timeZone),
-    };
   }
 
   if (row.kind === 'RECORDATORIO' || row.priority === 'RECORDATORIO') {

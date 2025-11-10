@@ -35,6 +35,10 @@ export default function IcsImportModal({ open, onClose, onImported }: Props) {
     try {
       setLoading(true);
       const res = await fetch('/api/import-ics', { method: 'POST', body: fd });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'No se pudo importar');
       onImported?.(json.count ?? 0);

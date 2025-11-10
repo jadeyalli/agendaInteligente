@@ -1,13 +1,14 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import ICAL from 'ical.js';
 import { prisma } from '@/lib/prisma';
-import { generateRandomPasswordHash } from '@/lib/auth';
 import type { Event as DbEvent } from '@prisma/client';
 
 type ImportMode = 'REMINDER' | 'SMART';
 
 export type ImportIcsOptions = {
-    userEmail?: string;          // dueño de eventos
-    calendarName?: string;       // calendario destino
+    userId: string;              // dueño de eventos
+    calendarId?: string | null;  // calendario destino existente
+    calendarName?: string;       // calendario destino (si no se especifica calendarId)
     mode?: ImportMode;           // 'REMINDER' | 'SMART'
     expandMonths?: number;       // para SMART (default 6)
 };
@@ -106,22 +107,33 @@ function allDayBoundsFromDate(start: Date, durationMs: number): { start: Date; e
     return { start: startUtc, end: new Date(startUtc.getTime() + durationMs) };
 }
 
-async function ensureUserAndCalendar(email: string, calendarName: string) {
-    const user =
-        (await prisma.user.findUnique({ where: { email } })) ??
-        (await prisma.user.create({
-            data: { email, name: 'Importado', password: generateRandomPasswordHash() },
-        }));
+async function ensureCalendarForUser(
+    userId: string,
+    options: { calendarId?: string | null; calendarName?: string },
+) {
+    const { calendarId, calendarName } = options;
 
-    const calendar =
-        (await prisma.calendar.findFirst({
-            where: { userId: user.id, name: calendarName },
-        })) ??
-        (await prisma.calendar.create({
-            data: { userId: user.id, name: calendarName, timezone: 'UTC' },
-        }));
+    if (calendarId) {
+        const calendar = await prisma.calendar.findFirst({ where: { id: calendarId, userId } });
+        if (!calendar) {
+            throw new Error('Calendario no encontrado para el usuario.');
+        }
+        return calendar;
+    }
 
-    return { user, calendar };
+    const name = calendarName?.trim() || 'Personal';
+    const existing = await prisma.calendar.findFirst({
+        where: { userId, name },
+        orderBy: { createdAt: 'asc' },
+    });
+
+    if (existing) {
+        return existing;
+    }
+
+    return prisma.calendar.create({
+        data: { userId, name, timezone: 'UTC' },
+    });
 }
 
 /** Expande una VEVENT recurrente hasta 'until' (incluido aprox.) */
@@ -152,10 +164,11 @@ function expandOccurrences(comp: any, until: Date): Date[] {
  */
 export async function importIcsFromText(
     icsText: string,
-    opts: ImportIcsOptions = {},
+    opts: ImportIcsOptions,
 ): Promise<{ importedIds: string[] }> {
     const {
-        userEmail = 'demo@local',
+        userId,
+        calendarId = null,
         calendarName = 'Personal',
         mode = 'REMINDER',
         expandMonths = 6,
@@ -165,7 +178,12 @@ export async function importIcsFromText(
     const vcal = new ICAL.Component(jcal);
     const vevents = vcal.getAllSubcomponents('vevent');
 
-    const { user, calendar } = await ensureUserAndCalendar(userEmail, calendarName);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+        throw new Error('Usuario no encontrado.');
+    }
+
+    const calendar = await ensureCalendarForUser(user.id, { calendarId, calendarName });
 
     const importedIds: string[] = [];
 
@@ -453,7 +471,7 @@ export async function importIcsFromText(
 import { readFileSync } from 'node:fs';
 export async function importIcsFromFile(
     filePath: string,
-    opts?: ImportIcsOptions,
+    opts: ImportIcsOptions,
 ) {
     const icsText = readFileSync(filePath, 'utf8');
     return importIcsFromText(icsText, opts);

@@ -1,8 +1,9 @@
 // app/api/schedule/solve/route.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generateRandomPasswordHash } from '@/lib/auth';
-import { AvailabilityWindow, Priority } from '@prisma/client';
+import { getSessionUser } from '@/lib/session';
+import { Priority } from '@prisma/client';
 import { spawn } from 'child_process';
 
 export const runtime = 'nodejs';
@@ -161,12 +162,9 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({} as any));
     // body puede traer: { new: [ {id, priority: "UnI"|"InU", durationMin, isInPerson, canOverlap, window, windowStart, windowEnd} ] }
     // Si no trae "new", solo re-optimiza lo existente.
-    const email = 'demo@local';
-    let user = await prisma.user.findUnique({ where: { email } });
+    const user = await getSessionUser();
     if (!user) {
-      user = await prisma.user.create({
-        data: { email, name: 'Demo', password: generateRandomPasswordHash() },
-      });
+      return NextResponse.json({ error: 'No autenticado.' }, { status: 401 });
     }
 
     const extraNew = Array.isArray(body?.new) ? body.new : [];
