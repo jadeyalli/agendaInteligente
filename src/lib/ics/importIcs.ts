@@ -101,6 +101,12 @@ function ensureDurationMs(start: Date, end: Date | null, isAllDay: boolean): num
     return HOUR_MS;
 }
 
+function dayWindowFor(date: Date): { windowStart: Date; windowEnd: Date } {
+    const windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+    const windowEnd = new Date(windowStart.getTime() + DAY_MS);
+    return { windowStart, windowEnd };
+}
+
 function toAllDayBounds(start: Date, end: Date | null): { start: Date; end: Date } {
     const startUtc = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
 
@@ -382,6 +388,8 @@ export async function importIcsFromText(
             continue;
         }
 
+        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(start);
+
         const smartBase = {
             userId: user.id,
             calendarId: calendar.id,
@@ -400,8 +408,8 @@ export async function importIcsFromText(
             category: null,
             status: 'WAITLIST' as const,
             window: 'RANGO' as const,
-            windowStart: null as Date | null,
-            windowEnd: null as Date | null,
+            windowStart: baseWindowStart,
+            windowEnd: baseWindowEnd,
         };
 
         const smartDurationMinutes = Math.max(1, Math.round(durationMs / 60000));
@@ -420,7 +428,8 @@ export async function importIcsFromText(
                     occurrenceDates.push(next.toJSDate());
                 }
             } else {
-                const until = new Date(start);
+                const now = new Date();
+                const until = new Date(now);
                 until.setUTCMonth(until.getUTCMonth() + (expandMonths || 6));
                 const occurrences = expandOccurrences(comp, until);
                 occurrenceCount = occurrences.length ? occurrences.length : 1;
@@ -432,13 +441,6 @@ export async function importIcsFromText(
             occurrenceDates = [start];
         }
 
-        if (!occurrenceCount || occurrenceCount < occurrenceDates.length) {
-            occurrenceCount = occurrenceDates.length;
-        }
-
-        const dayOffsets = computeDayOffsets(occurrenceDates, occurrenceCount);
-        const anchor = context.earliestStart;
-
         const baseEventData = {
             ...smartBase,
             start: null,
@@ -449,20 +451,19 @@ export async function importIcsFromText(
         };
 
         if (occurrenceCount <= 1) {
-            const offsetDays = dayOffsets[0] ?? 0;
-            const windowStart = new Date(anchor.getTime() + offsetDays * DAY_MS);
+            const { windowStart, windowEnd } = dayWindowFor(occurrenceDates[0] ?? start);
             if (whereByUid) {
                 const saved = await prisma.event.upsert({
                     where: whereByUid,
                     update: {
                         ...baseEventData,
                         windowStart,
-                        windowEnd: null,
+                        windowEnd,
                         originEventId: null,
                     },
                     create: uid
-                        ? { ...baseEventData, uid, windowStart, windowEnd: null }
-                        : { ...baseEventData, windowStart, windowEnd: null },
+                        ? { ...baseEventData, uid, windowStart, windowEnd }
+                        : { ...baseEventData, windowStart, windowEnd },
                 });
                 importedIds.push(saved.id);
                 schedulingCandidates.push(saved);
@@ -471,8 +472,9 @@ export async function importIcsFromText(
                     data: {
                         ...baseEventData,
                         windowStart,
-                        windowEnd: null,
+                        windowEnd,
                     },
+                    create: uid ? { ...baseEventData, uid } : baseEventData,
                 });
                 importedIds.push(saved.id);
                 schedulingCandidates.push(saved);
@@ -501,6 +503,25 @@ export async function importIcsFromText(
 
         let master: DbEvent | null = null;
         for (let index = 0; index < occurrenceCount; index += 1) {
+            const occurrence = occurrenceDates[index] ?? addDays(start, index);
+            const { windowStart, windowEnd } = dayWindowFor(occurrence);
+            const data = {
+                ...baseEventData,
+                windowStart,
+                windowEnd,
+                ...(index === 0 && uid ? { uid } : {}),
+                ...(master ? { originEventId: master.id } : {}),
+            };
+            const created = await prisma.event.create({ data });
+            if (!master) {
+                master = created;
+            }
+            importedIds.push(created.id);
+            schedulingCandidates.push(created);
+        }
+
+        let master: DbEvent | null = null;
+        for (let index = 0; index < occurrenceCount; index += 1) {
             const offsetDays = dayOffsets[index] ?? index;
             const windowStart = new Date(anchor.getTime() + offsetDays * DAY_MS);
             const data = {
@@ -520,6 +541,19 @@ export async function importIcsFromText(
     }
 
     if (schedulingCandidates.length) {
+        await scheduleFlexibleEvents(user.id, schedulingCandidates, context);
+
+        const scheduled = await prisma.event.findMany({
+            where: { id: { in: schedulingCandidates.map((event) => event.id) } },
+        });
+
+        await preemptLowerPriorityEvents(user.id, scheduled, context);
+    }
+
+    if (schedulingCandidates.length) {
+        const prefs = await loadSchedulingPreferences(user.id);
+        const context = buildSchedulingContext(prefs);
+
         await scheduleFlexibleEvents(user.id, schedulingCandidates, context);
 
         const scheduled = await prisma.event.findMany({
