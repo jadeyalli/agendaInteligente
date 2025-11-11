@@ -195,7 +195,7 @@ export default function LoginPage() {
       </main>
 
       <footer className="px-6 pb-8 text-center text-xs text-[var(--muted)]">
-        <p>© {new Date().getFullYear()} Agenda Inteligente · Organización simple para tu equipo</p>
+        <p>© {new Date().getFullYear()} Agenda Inteligente</p>
       </footer>
     </div>
   );

@@ -45,13 +45,6 @@ export default function HomePage() {
           >
             Iniciar sesión
           </Link>
-          <Link
-            href="/dashboard"
-            className="hidden items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 sm:inline-flex"
-          >
-            Ir al panel
-            <ArrowRight className="h-4 w-4" />
-          </Link>
         </div>
       </header>
 
@@ -64,7 +57,7 @@ export default function HomePage() {
             Planea tu semana con claridad y sin complicaciones.
           </h1>
           <p className="mx-auto max-w-3xl text-base text-[var(--muted)] sm:text-lg">
-            Agenda Inteligente es una plataforma digital que optimiza la gestión del tiempo mediante priorización cognitiva y programación inteligente. Su funcionamiento va más allá de un calendario tradicional: analiza las actividades del usuario, distingue entre lo urgente y lo importante, y reorganiza automáticamente los eventos para aprovechar al máximo la disponibilidad real. Con una interfaz clara y adaptable, ayuda a planificar jornadas equilibradas, reducir conflictos de agenda y concentrarse en lo que realmente importa. Es una herramienta diseñada para transformar la organización diaria en una experiencia más eficiente, consciente y personalizada.
+            Agenda Inteligente es una plataforma digital que optimiza la gestión del tiempo mediante priorización cognitiva y programación inteligente.
           </p>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
@@ -98,7 +91,6 @@ export default function HomePage() {
 
       <footer className="border-t border-slate-200/60 bg-white/70 px-6 py-6 text-center text-sm text-[var(--muted)]">
         <p className="font-medium">{new Date().getFullYear()} · Agenda Inteligente</p>
-        <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Tu rutina con intención</p>
       </footer>
     </div>
   );
