@@ -147,6 +147,16 @@ body {
   padding: 2px 6px;
 }
 
+/* Días deshabilitados por preferencias */
+.fc .fc-bg-event.fc-day-disabled-overlay {
+  background: rgba(148, 163, 184, 0.18) !important;
+  border: none !important;
+  pointer-events: none;
+}
+.dark .fc .fc-bg-event.fc-day-disabled-overlay {
+  background: rgba(148, 163, 184, 0.26) !important;
+}
+
 /* Vista anual 4x3 compacta (estilo Google) */
 .fc .fc-multimonth {
   display: grid !important;
