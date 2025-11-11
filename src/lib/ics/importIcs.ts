@@ -108,16 +108,16 @@ function isoDayFromJsDay(day: number): number {
 function dayWindowFor(
     date: Date,
     enabledWeekdays?: Set<number>,
-): { windowStart: Date; windowEnd: Date } {
-    let windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+): { windowStart: Date; windowEnd: Date } | null {
+    const windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 
     if (!enabledWeekdays || enabledWeekdays.size === 0 || enabledWeekdays.size >= 7) {
         const windowEnd = new Date(windowStart.getTime() + DAY_MS);
         return { windowStart, windowEnd };
     }
 
-    while (!enabledWeekdays.has(isoDayFromJsDay(windowStart.getDay()))) {
-        windowStart = new Date(windowStart.getTime() + DAY_MS);
+    if (!enabledWeekdays.has(isoDayFromJsDay(windowStart.getDay()))) {
+        return null;
     }
 
     const windowEnd = new Date(windowStart.getTime() + DAY_MS);
@@ -192,6 +192,28 @@ function expandOccurrences(comp: any, until: Date): Date[] {
         dates.push(next.toJSDate());
     }
     return dates;
+}
+
+async function removeExistingSeries(calendarId: string, uid: string) {
+    const existing = await prisma.event.findFirst({
+        where: {
+            calendarId,
+            uid,
+        },
+    });
+
+    if (!existing) {
+        return;
+    }
+
+    await prisma.event.deleteMany({
+        where: {
+            OR: [
+                { id: existing.id },
+                { originEventId: existing.id },
+            ],
+        },
+    });
 }
 
 /**
@@ -286,22 +308,7 @@ export async function importIcsFromText(
 
             if (hasReminderRrule) {
                 if (uid) {
-                    const existing = await prisma.event.findFirst({
-                        where: {
-                            calendarId: calendar.id,
-                            uid,
-                        },
-                    });
-                    if (existing) {
-                        await prisma.event.deleteMany({
-                            where: {
-                                OR: [
-                                    { id: existing.id },
-                                    { originEventId: existing.id },
-                                ],
-                            },
-                        });
-                    }
+                    await removeExistingSeries(calendar.id, uid);
                 }
 
                 const now = new Date();
@@ -373,10 +380,14 @@ export async function importIcsFromText(
             continue;
         }
 
-        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(
-            start,
-            prefs.enabledWeekdays,
-        );
+        const baseWindow = dayWindowFor(start, prefs.enabledWeekdays);
+        if (!baseWindow) {
+            if (uid) {
+                await removeExistingSeries(calendar.id, uid);
+            }
+            continue;
+        }
+        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = baseWindow;
 
         const smartBase = {
             userId: user.id,
@@ -439,10 +450,14 @@ export async function importIcsFromText(
         };
 
         if (occurrenceCount <= 1) {
-            const { windowStart, windowEnd } = dayWindowFor(
-                occurrenceDates[0] ?? start,
-                prefs.enabledWeekdays,
-            );
+            const singleWindow = dayWindowFor(occurrenceDates[0] ?? start, prefs.enabledWeekdays);
+            if (!singleWindow) {
+                if (uid) {
+                    await removeExistingSeries(calendar.id, uid);
+                }
+                continue;
+            }
+            const { windowStart, windowEnd } = singleWindow;
             if (whereByUid) {
                 const saved = await prisma.event.upsert({
                     where: whereByUid,
@@ -474,28 +489,17 @@ export async function importIcsFromText(
         }
 
         if (uid) {
-            const existing = await prisma.event.findFirst({
-                where: {
-                    calendarId: calendar.id,
-                    uid,
-                },
-            });
-            if (existing) {
-                await prisma.event.deleteMany({
-                    where: {
-                        OR: [
-                            { id: existing.id },
-                            { originEventId: existing.id },
-                        ],
-                    },
-                });
-            }
+            await removeExistingSeries(calendar.id, uid);
         }
 
         let master: DbEvent | null = null;
         for (let index = 0; index < occurrenceCount; index += 1) {
             const occurrence = occurrenceDates[index] ?? addDays(start, index);
-            const { windowStart, windowEnd } = dayWindowFor(occurrence, prefs.enabledWeekdays);
+            const occurrenceWindow = dayWindowFor(occurrence, prefs.enabledWeekdays);
+            if (!occurrenceWindow) {
+                continue;
+            }
+            const { windowStart, windowEnd } = occurrenceWindow;
             const data = {
                 ...baseEventData,
                 windowStart,
