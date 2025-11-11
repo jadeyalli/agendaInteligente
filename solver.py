@@ -500,6 +500,20 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
         # política de días activos
         base_range = filter_allowed_days(base_range, e.duration_slots)
 
+        # respeta la antelación mínima configurable (solo aplica a urgentes/relevantes)
+        if e.priority in ("UnI", "InU") and now_slot > 0:
+            filtered = [s for s in base_range if s >= now_slot]
+            # si el evento ya estaba programado antes del límite, permitir mantenerlo
+            if (
+                e.current_start_slot is not None
+                and e.current_start_slot < now_slot
+                and e.current_start_slot in base_range
+            ):
+                filtered.append(e.current_start_slot)
+            if filtered:
+                filtered = sorted(set(filtered))
+            base_range = filtered
+
         starts = base_range
 
         # si no puede solaparse, remover choque con fijos
