@@ -84,6 +84,7 @@ model User {
   events    Event[]
   slots     AvailabilitySlot[]
   calendars Calendar[]
+  settings  UserSettings?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -220,4 +221,19 @@ model AvailabilitySlot {
   endTime   String // "HH:mm"
 
   @@index([userId, dayOfWeek])
+}
+
+model UserSettings {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  dayStart String @default("09:00")
+  dayEnd   String @default("18:00")
+  enabledDays String @default("[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\"]")
+  eventBufferMinutes     Int @default(0)
+  schedulingLeadMinutes  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -15,6 +15,12 @@ import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/Eve
 
 import { THEMES, currentTheme } from '@/theme/themes';
 import {
+  DEFAULT_USER_SETTINGS,
+  hhmmToFullCalendar,
+  timeStringToParts,
+  type UserSettingsValues,
+} from '@/lib/user-settings';
+import {
   dateToDateStringLocal,
   dateToTimeStringLocal,
   debugDateFull,
@@ -100,7 +106,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
   // === estado calendario ===
   const [view, setView] = useState<ViewId>('timeGridWeek');
-  const [weekends, setWeekends] = useState(true);
+  const [weekends, setWeekends] = useState(
+    DEFAULT_USER_SETTINGS.enabledDays.some((d) => d === 'sat' || d === 'sun'),
+  );
   const [title, setTitle] = useState<string>('');
   const [viewTransitioning, setViewTransitioning] = useState(false);
 
@@ -124,6 +132,18 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [rows, setRows] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
+
+  const defaultStartParts = timeStringToParts(DEFAULT_USER_SETTINGS.dayStart);
+  const defaultEndParts = timeStringToParts(DEFAULT_USER_SETTINGS.dayEnd);
+  const defaultRangeValid =
+    defaultEndParts.hour > defaultStartParts.hour ||
+    (defaultEndParts.hour === defaultStartParts.hour && defaultEndParts.minute > defaultStartParts.minute);
+  const [slotMinTime, setSlotMinTime] = useState<string>(
+    defaultRangeValid ? hhmmToFullCalendar(DEFAULT_USER_SETTINGS.dayStart) : '00:00:00',
+  );
+  const [slotMaxTime, setSlotMaxTime] = useState<string>(
+    defaultRangeValid ? hhmmToFullCalendar(DEFAULT_USER_SETTINGS.dayEnd) : '24:00:00',
+  );
 
   const calendarRef = useRef<FullCalendar | null>(null);
   const api = () => calendarRef.current?.getApi();
@@ -158,6 +178,36 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }
 
   useEffect(() => { loadEvents(); }, []);
+
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/settings', { cache: 'no-store' });
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        if (!res.ok) throw new Error('No se pudieron cargar las preferencias');
+        const data = (await res.json()) as UserSettingsValues;
+
+        const startParts = timeStringToParts(data.dayStart);
+        const endParts = timeStringToParts(data.dayEnd);
+        const hasValidRange =
+          endParts.hour > startParts.hour ||
+          (endParts.hour === startParts.hour && endParts.minute > startParts.minute);
+
+        setSlotMinTime(hasValidRange ? hhmmToFullCalendar(data.dayStart) : '00:00:00');
+        setSlotMaxTime(hasValidRange ? hhmmToFullCalendar(data.dayEnd) : '24:00:00');
+
+        const hasWeekend = data.enabledDays?.some((d) => d === 'sat' || d === 'sun');
+        setWeekends(Boolean(hasWeekend));
+      } catch (err) {
+        console.error('Error cargando configuración', err);
+      }
+    }
+
+    loadSettings();
+  }, []);
 
   // ====== Crear desde el modal ======
   async function handleCreateFromModal(payload: CreateModalSubmitPayload) {
@@ -510,8 +560,8 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
                 stickyHeaderDates
                 height="auto"
                 slotDuration="00:30:00"
-                slotMinTime="05:00:00"
-                slotMaxTime="23:00:00"
+                slotMinTime={slotMinTime}
+                slotMaxTime={slotMaxTime}
                 allDaySlot
                 selectable
                 selectMirror
