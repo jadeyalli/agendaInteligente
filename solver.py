@@ -459,8 +459,13 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
     fixed_blocking = [f for f in fixed if f.blocks_capacity]
 
     # Helper: filtrar completamente a "slots preferidos" si hay al menos 1 opción factible allí.
-    def filter_to_preferred_if_possible(starts: List[int], dur: int) -> List[int]:
-        preferred_starts = []
+    def filter_to_preferred_if_possible(
+        starts: List[int], dur: int, require: bool = False
+    ) -> List[int]:
+        if not preferred_slots:
+            return starts
+
+        preferred_starts: List[int] = []
         for s in starts:
             ok = True
             for t in range(s, s + dur):
@@ -469,7 +474,11 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
                     break
             if ok:
                 preferred_starts.append(s)
-        return preferred_starts if preferred_starts else starts
+
+        if preferred_starts:
+            return preferred_starts
+
+        return preferred_starts if require else starts
 
     # Helper: filtrar días deshabilitados
     def filter_allowed_days(starts: List[int], dur: int) -> List[int]:
@@ -500,14 +509,32 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
         # política de días activos
         base_range = filter_allowed_days(base_range, e.duration_slots)
 
+        # respeta la antelación mínima configurable (solo aplica a urgentes/relevantes)
+        if e.priority in ("UnI", "InU") and now_slot > 0:
+            filtered = [s for s in base_range if s >= now_slot]
+            # si el evento ya estaba programado antes del límite, permitir mantenerlo
+            if (
+                e.current_start_slot is not None
+                and e.current_start_slot < now_slot
+                and e.current_start_slot in base_range
+            ):
+                filtered.append(e.current_start_slot)
+            if filtered:
+                filtered = sorted(set(filtered))
+            base_range = filtered
+
         starts = base_range
+
+        require_preferred = e.priority in ("UnI", "InU")
+        starts = filter_to_preferred_if_possible(starts, e.duration_slots, require=require_preferred)
 
         # si no puede solaparse, remover choque con fijos
         if not e.overlap and fixed_blocking:
             starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking, buffer_for_event)
 
         # respetar disponibilidad: intentar restringir SOLO a preferidos si hay opción
-        starts = filter_to_preferred_if_possible(starts, e.duration_slots)
+        if not require_preferred:
+            starts = filter_to_preferred_if_possible(starts, e.duration_slots)
 
         # Orden simple por inicio
         starts.sort()

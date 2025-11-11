@@ -426,8 +426,13 @@ def build_debug_info(payload: Dict[str, Any],
 
     # Helpers internos
 
-    def filter_to_preferred_if_possible(starts: List[int], dur: int) -> List[int]:
-        preferred_starts = []
+    def filter_to_preferred_if_possible(
+        starts: List[int], dur: int, require: bool = False
+    ) -> List[int]:
+        if not preferred_slots:
+            return starts
+
+        preferred_starts: List[int] = []
         for s in starts:
             ok = True
             for t in range(s, s + dur):
@@ -436,7 +441,11 @@ def build_debug_info(payload: Dict[str, Any],
                     break
             if ok:
                 preferred_starts.append(s)
-        return preferred_starts if preferred_starts else starts
+
+        if preferred_starts:
+            return preferred_starts
+
+        return preferred_starts if require else starts
 
     def filter_allowed_days(starts: List[int], dur: int) -> List[int]:
         if len(allowed_days) >= 7:
@@ -472,12 +481,16 @@ def build_debug_info(payload: Dict[str, Any],
 
         starts = base_range
 
+        require_preferred = e.priority in ("UnI", "InU")
+        starts = filter_to_preferred_if_possible(starts, e.duration_slots, require=require_preferred)
+
         # si no puede solaparse, remover choque con fijos
         if not e.overlap and fixed_blocking:
             starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking, buffer_for_event)
 
         # restringir a preferidos si hay opción
-        starts = filter_to_preferred_if_possible(starts, e.duration_slots)
+        if not require_preferred:
+            starts = filter_to_preferred_if_possible(starts, e.duration_slots)
 
         starts.sort()
         starts = reduce_candidates(e.priority, starts, k=300)
