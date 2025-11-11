@@ -459,8 +459,13 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
     fixed_blocking = [f for f in fixed if f.blocks_capacity]
 
     # Helper: filtrar completamente a "slots preferidos" si hay al menos 1 opción factible allí.
-    def filter_to_preferred_if_possible(starts: List[int], dur: int) -> List[int]:
-        preferred_starts = []
+    def filter_to_preferred_if_possible(
+        starts: List[int], dur: int, require: bool = False
+    ) -> List[int]:
+        if not preferred_slots:
+            return starts
+
+        preferred_starts: List[int] = []
         for s in starts:
             ok = True
             for t in range(s, s + dur):
@@ -469,7 +474,11 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
                     break
             if ok:
                 preferred_starts.append(s)
-        return preferred_starts if preferred_starts else starts
+
+        if preferred_starts:
+            return preferred_starts
+
+        return preferred_starts if require else starts
 
     # Helper: filtrar días deshabilitados
     def filter_allowed_days(starts: List[int], dur: int) -> List[int]:
@@ -516,12 +525,16 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         starts = base_range
 
+        require_preferred = e.priority in ("UnI", "InU")
+        starts = filter_to_preferred_if_possible(starts, e.duration_slots, require=require_preferred)
+
         # si no puede solaparse, remover choque con fijos
         if not e.overlap and fixed_blocking:
             starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking, buffer_for_event)
 
         # respetar disponibilidad: intentar restringir SOLO a preferidos si hay opción
-        starts = filter_to_preferred_if_possible(starts, e.duration_slots)
+        if not require_preferred:
+            starts = filter_to_preferred_if_possible(starts, e.duration_slots)
 
         # Orden simple por inicio
         starts.sort()
