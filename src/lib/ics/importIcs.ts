@@ -439,6 +439,7 @@ export async function importIcsFromText(
                         windowStart,
                         windowEnd,
                     },
+                    create: uid ? { ...baseEventData, uid } : baseEventData,
                 });
                 importedIds.push(saved.id);
                 schedulingCandidates.push(saved);
