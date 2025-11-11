@@ -5,8 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {
   Calendar as CalendarIcon,
-  ListTodo,
-  ClipboardList,
+  Clock3,
   Settings,
   Menu,
   X,
@@ -34,8 +33,7 @@ type NavItem = { href: string; label: string; icon: React.ReactNode; active?: bo
 
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Calendario', icon: <CalendarIcon className="h-4 w-4" />, active: true },
-  { href: '/tasks', label: 'Tareas', icon: <ListTodo className="h-4 w-4" /> },
-  { href: '/requests', label: 'Solicitudes', icon: <ClipboardList className="h-4 w-4" /> },
+  { href: '/dashboard#waitlist', label: 'Lista de espera', icon: <Clock3 className="h-4 w-4" /> },
   { href: '/settings', label: 'Configuración', icon: <Settings className="h-4 w-4" /> },
 ];
 

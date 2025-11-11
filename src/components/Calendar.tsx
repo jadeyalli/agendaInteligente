@@ -44,6 +44,7 @@ type EventRow = {
   description?: string | null;
   category?: string | null;
   priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO' | null;
+  status?: string | null;
 
   // tiempo
   start?: string | null;
@@ -100,6 +101,24 @@ type ModalInitialReminder = {
 
 type ModalInitial = ModalInitialEvent | ModalInitialTask | ModalInitialReminder;
 
+type WaitlistGroup = { category: string; events: EventRow[] };
+
+const WAITLIST_CATEGORY_ORDER = ['Escuela', 'Trabajo', 'Personal', 'Familia', 'Salud', 'Otros'];
+
+const WAITLIST_WINDOW_LABELS: Record<Exclude<EventRow['window'], null | 'NONE'>, string> = {
+  PRONTO: 'Próximos días',
+  SEMANA: 'Esta semana',
+  MES: 'Este mes',
+  RANGO: 'Rango sugerido',
+};
+
+const KIND_LABELS: Record<EventRow['kind'], string> = {
+  EVENTO: 'Evento',
+  TAREA: 'Tarea',
+  SOLICITUD: 'Solicitud',
+  RECORDATORIO: 'Recordatorio',
+};
+
 export default function Calendar({ onViewChange }: CalendarProps) {
   // === tema (escucha cambios emitidos por la página) ===
   const [theme, setTheme] = useState(currentTheme());
@@ -119,6 +138,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
   const [openCreate, setOpenCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createInitial, setCreateInitial] = useState<ModalInitialEvent | null>(null);
+  const [waitlistPromotingId, setWaitlistPromotingId] = useState<string | null>(null);
 
   const [openEdit, setOpenEdit] = useState(false);
   const [editInitial, setEditInitial] = useState<ModalInitial | null>(null);
@@ -155,6 +176,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
   const calendarRef = useRef<FullCalendar | null>(null);
   const api = () => calendarRef.current?.getApi();
+  const waitlistPromoteRef = useRef<EventRow | null>(null);
 
   // evita loops al cambiar vista/rango
   const lastMetaRef = useRef<{ view: ViewId; title: string; startMs: number; endMs: number } | null>(null);
@@ -247,6 +269,139 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     return jsIndexes;
   }, [disabledWeekdayIndexes]);
 
+  const waitlistGroups = useMemo<WaitlistGroup[]>(() => {
+    if (!rows.length) return [];
+    const groups = new Map<string, EventRow[]>();
+
+    const normalizeCategory = (value?: string | null) => {
+      if (!value) return 'Otros';
+      const trimmed = value.trim();
+      if (!trimmed) return 'Otros';
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    };
+
+    for (const row of rows) {
+      const priority = row.priority ?? undefined;
+      const status = typeof row.status === 'string' ? row.status.toUpperCase() : '';
+      if (priority !== 'OPCIONAL' && status !== 'WAITLIST') continue;
+      if (row.kind === 'RECORDATORIO') continue;
+
+      const category = normalizeCategory(row.category);
+      if (!groups.has(category)) {
+        groups.set(category, []);
+      }
+      groups.get(category)!.push(row);
+    }
+
+    const entries: WaitlistGroup[] = [];
+    const getSortValue = (row: EventRow) => (row.start ? new Date(row.start).getTime() : Number.MAX_SAFE_INTEGER);
+
+    for (const [category, events] of groups.entries()) {
+      entries.push({
+        category,
+        events: events
+          .slice()
+          .sort((a, b) => {
+            const diff = getSortValue(a) - getSortValue(b);
+            if (diff !== 0) return diff;
+            return a.title.localeCompare(b.title, 'es');
+          }),
+      });
+    }
+
+    entries.sort((a, b) => {
+      const idxA = WAITLIST_CATEGORY_ORDER.indexOf(a.category);
+      const idxB = WAITLIST_CATEGORY_ORDER.indexOf(b.category);
+      const orderA = idxA === -1 ? WAITLIST_CATEGORY_ORDER.length : idxA;
+      const orderB = idxB === -1 ? WAITLIST_CATEGORY_ORDER.length : idxB;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.category.localeCompare(b.category, 'es');
+    });
+
+    return entries;
+  }, [rows]);
+
+  const waitlistTotal = useMemo(
+    () => waitlistGroups.reduce((sum, group) => sum + group.events.length, 0),
+    [waitlistGroups],
+  );
+
+  const waitlistDateFormatter = useMemo(
+    () => new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeZone: browserTimeZone }),
+    [browserTimeZone],
+  );
+
+  const waitlistDateTimeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('es-ES', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: browserTimeZone,
+      }),
+    [browserTimeZone],
+  );
+
+  const formatWaitlistDate = (value?: string | null, includeTime = false) => {
+    if (!value) return null;
+    const date = isoToDate(value);
+    if (!date) return null;
+    return includeTime ? waitlistDateTimeFormatter.format(date) : waitlistDateFormatter.format(date);
+  };
+
+  const formatSuggestedTime = (event: EventRow) => {
+    if (!event.start) return null;
+    const startDate = isoToDate(event.start);
+    if (!startDate) return null;
+
+    if (event.isAllDay) {
+      return waitlistDateFormatter.format(startDate);
+    }
+
+    const startDateLabel = waitlistDateFormatter.format(startDate);
+    const startTimeLabel = dateToTimeStringLocal(startDate, browserTimeZone);
+
+    if (event.end) {
+      const endDate = isoToDate(event.end);
+      if (endDate) {
+        const sameDay = startDate.toDateString() === endDate.toDateString();
+        const endTimeLabel = dateToTimeStringLocal(endDate, browserTimeZone);
+        if (sameDay && endTimeLabel) {
+          return `${startDateLabel} · ${startTimeLabel} – ${endTimeLabel}`;
+        }
+        return `${waitlistDateTimeFormatter.format(startDate)} – ${waitlistDateTimeFormatter.format(endDate)}`;
+      }
+    }
+
+    return `${startDateLabel} · ${startTimeLabel}`;
+  };
+
+  const formatWindow = (event: EventRow) => {
+    const code = event.window && event.window !== 'NONE' ? event.window : null;
+    if (!code) return null;
+    if (code === 'RANGO') {
+      const start = formatWaitlistDate(event.windowStart, false);
+      const end = formatWaitlistDate(event.windowEnd, false);
+      if (start && end) return `Entre ${start} y ${end}`;
+      if (start) return `Desde ${start}`;
+      if (end) return `Hasta ${end}`;
+    }
+    return WAITLIST_WINDOW_LABELS[code];
+  };
+
+  const formatDuration = (event: EventRow) => {
+    const minutes = typeof event.durationMinutes === 'number' ? event.durationMinutes : null;
+    if (!minutes || minutes <= 0) return null;
+    if (minutes % 60 === 0) {
+      const hours = minutes / 60;
+      return `${hours} h`;
+    }
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    if (!remainder) return `${hours} h`;
+    return `${hours} h ${remainder} min`;
+  };
+
   // ====== Crear desde el modal ======
   async function handleCreateFromModal(payload: CreateModalSubmitPayload) {
     try {
@@ -262,7 +417,28 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo crear');
       }
+      const waitlistSource = waitlistPromoteRef.current;
       setOpenCreate(false);
+      setCreateInitial(null);
+      waitlistPromoteRef.current = null;
+      setWaitlistPromotingId(null);
+      if (waitlistSource) {
+        try {
+          const deleteRes = await fetch(`/api/events?id=${encodeURIComponent(waitlistSource.id)}`, {
+            method: 'DELETE',
+          });
+          if (!deleteRes.ok) {
+            const err = await deleteRes.json().catch(() => ({}));
+            throw new Error(err.error || 'No se pudo eliminar de la lista de espera');
+          }
+        } catch (deleteError) {
+          const message =
+            deleteError instanceof Error
+              ? deleteError.message
+              : 'No se pudo eliminar de la lista de espera';
+          alert(message);
+        }
+      }
       await loadEvents();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error al crear';
@@ -271,6 +447,14 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setCreating(false);
     }
   }
+
+  const handleScheduleFromWaitlist = (event: EventRow) => {
+    waitlistPromoteRef.current = event;
+    setWaitlistPromotingId(event.id);
+    const initial = mapWaitlistRowToCreateInitial(event, browserTimeZone);
+    setCreateInitial(initial);
+    setOpenCreate(true);
+  };
 
   // ====== Editar desde el modal ======
   async function handleEditFromModal(payload: CreateModalSubmitPayload) {
@@ -381,6 +565,32 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
     timeStart: dateToTimeStringLocal(startDate, timeZone),
     timeEnd: dateToTimeStringLocal(endDate, timeZone),
     durationHours: minutesToHourString(durationForForm) || '1',
+  };
+}
+
+function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalInitialEvent {
+  const startDate = row.start ? isoToDate(row.start) : null;
+  const endDate = row.end ? isoToDate(row.end) : null;
+  const durationMinutes = typeof row.durationMinutes === 'number' ? row.durationMinutes : null;
+
+  const durationHours = (() => {
+    if (!durationMinutes || durationMinutes <= 0) return '1';
+    const hours = Math.round((durationMinutes / 60) * 100) / 100;
+    return hours > 0 ? hours.toString() : '1';
+  })();
+
+  return {
+    kind: 'EVENTO',
+    title: row.title,
+    description: row.description ?? '',
+    category: row.category ?? '',
+    priority: 'RELEVANTE',
+    repeat: 'NONE',
+    window: 'NONE',
+    date: dateToDateStringLocal(startDate, timeZone),
+    timeStart: dateToTimeStringLocal(startDate, timeZone),
+    timeEnd: dateToTimeStringLocal(endDate, timeZone),
+    durationHours,
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======
@@ -605,7 +815,12 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
 
             <button
               className="inline-flex items-center rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-60"
-              onClick={() => setOpenCreate(true)}
+              onClick={() => {
+                waitlistPromoteRef.current = null;
+                setWaitlistPromotingId(null);
+                setCreateInitial(null);
+                setOpenCreate(true);
+              }}
               type="button"
               disabled={creating}
             >
@@ -622,98 +837,202 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
         </div>
       </header>
 
-      <div className="relative flex-1 overflow-hidden rounded-3xl border border-slate-200/70 bg-[var(--surface)]/90 shadow-sm">
-        <div className="relative h-full overflow-hidden">
-          <div className="h-full overflow-y-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
-            <div className={['px-2 pb-4 pt-3 sm:px-4', viewTransitioning ? 'calendar-fade' : ''].join(' ')}>
-              <FullCalendar
-                ref={calendarRef}
-                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin]}
-                locales={[esLocale]}
-                locale="es"
-                initialView={view}
-                headerToolbar={false}
-                weekends={weekends}
-                navLinks
-                nowIndicator
-                expandRows
-                stickyHeaderDates
-                height="auto"
-                slotDuration="00:30:00"
-                slotMinTime={slotMinTime}
-                slotMaxTime={slotMaxTime}
-                allDaySlot
-                selectable
-                selectMirror
-                editable={false}
-                views={{
-                  dayGridMonth: { dayMaxEventRows: 5 },
-                  multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
-                }}
-                dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
-                slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
-                weekNumberCalculation="ISO"
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-[var(--surface)]/90 shadow-sm">
+          <div className="relative h-full overflow-hidden">
+            <div className="h-full overflow-y-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
+              <div className={['px-2 pb-4 pt-3 sm:px-4', viewTransitioning ? 'calendar-fade' : ''].join(' ')}>
+                <FullCalendar
+                  ref={calendarRef}
+                  plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, multiMonthPlugin]}
+                  locales={[esLocale]}
+                  locale="es"
+                  initialView={view}
+                  headerToolbar={false}
+                  weekends={weekends}
+                  navLinks
+                  nowIndicator
+                  expandRows
+                  stickyHeaderDates
+                  height="auto"
+                  slotDuration="00:30:00"
+                  slotMinTime={slotMinTime}
+                  slotMaxTime={slotMaxTime}
+                  allDaySlot
+                  selectable
+                  selectMirror
+                  editable={false}
+                  views={{
+                    dayGridMonth: { dayMaxEventRows: 5 },
+                    multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
+                  }}
+                  dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
+                  slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+                  weekNumberCalculation="ISO"
 
-                events={fcEvents}
+                  events={fcEvents}
 
-                eventClick={(info) => {
-                  const raw = info.event.extendedProps?.raw as PreviewRow | undefined;
-                  if (!raw) return;
-                  setSelected(raw);
-                  setOpenPreview(true);
-                }}
-                dateClick={(arg) => {
-                  api()?.changeView('timeGridDay', arg.date);
-                  setView('timeGridDay');
-                }}
-                navLinkDayClick={(date) => {
-                  api()?.changeView('timeGridDay', date);
-                  setView('timeGridDay');
-                }}
-                datesSet={({ view: v, start, end }) => {
-                  const vtype = v.type as ViewId;
-                  const newTitle = v.title;
-                  const startMs = start.getTime();
-                  const endMs = end.getTime();
+                  eventClick={(info) => {
+                    const raw = info.event.extendedProps?.raw as PreviewRow | undefined;
+                    if (!raw) return;
+                    setSelected(raw);
+                    setOpenPreview(true);
+                  }}
+                  dateClick={(arg) => {
+                    api()?.changeView('timeGridDay', arg.date);
+                    setView('timeGridDay');
+                  }}
+                  navLinkDayClick={(date) => {
+                    api()?.changeView('timeGridDay', date);
+                    setView('timeGridDay');
+                  }}
+                  datesSet={({ view: v, start, end }) => {
+                    const vtype = v.type as ViewId;
+                    const newTitle = v.title;
+                    const startMs = start.getTime();
+                    const endMs = end.getTime();
 
-                  const last = lastMetaRef.current;
-                  const changed =
-                    !last ||
-                    last.view !== vtype ||
-                    last.title !== newTitle ||
-                    last.startMs !== startMs ||
-                    last.endMs !== endMs;
+                    const last = lastMetaRef.current;
+                    const changed =
+                      !last ||
+                      last.view !== vtype ||
+                      last.title !== newTitle ||
+                      last.startMs !== startMs ||
+                      last.endMs !== endMs;
 
-                  if (!changed) return;
+                    if (!changed) return;
 
-                  setTitle(newTitle);
-                  onViewChange?.({ view: vtype, title: newTitle, start, end });
-                  setVisibleRange({ start, end });
+                    setTitle(newTitle);
+                    onViewChange?.({ view: vtype, title: newTitle, start, end });
+                    setVisibleRange({ start, end });
 
-                  lastMetaRef.current = { view: vtype, title: newTitle, startMs, endMs };
-                }}
+                    lastMetaRef.current = { view: vtype, title: newTitle, startMs, endMs };
+                  }}
 
-                eventContent={(arg) => {
-                  const timeText = arg.timeText ? `${arg.timeText} ` : '';
-                  return (
-                    <div className="truncate text-xs font-medium text-[var(--fg)] sm:text-[13px]">
-                      <span className="text-[var(--muted)]">{timeText}</span>
-                      <span>{arg.event.title}</span>
-                    </div>
-                  );
-                }}
-                dayCellDidMount={(info) => {
-                  if (info.isToday) info.el.classList.add('fc-is-today-strong');
-                }}
-              />
+                  eventContent={(arg) => {
+                    const timeText = arg.timeText ? `${arg.timeText} ` : '';
+                    return (
+                      <div className="truncate text-xs font-medium text-[var(--fg)] sm:text-[13px]">
+                        <span className="text-[var(--muted)]">{timeText}</span>
+                        <span>{arg.event.title}</span>
+                      </div>
+                    );
+                  }}
+                  dayCellDidMount={(info) => {
+                    if (info.isToday) info.el.classList.add('fc-is-today-strong');
+                  }}
+                />
+              </div>
             </div>
           </div>
+          {loading ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center text-xs font-medium text-[var(--muted)]">
+              Cargando eventos…
+            </div>
+          ) : null}
         </div>
-        {loading ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center text-xs font-medium text-[var(--muted)]">
-            Cargando eventos…
+
+        <aside
+          id="waitlist"
+          className="flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-[var(--surface)]/90 shadow-sm"
+        >
+          <div className="border-b border-slate-200/70 px-4 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--fg)]">Lista de espera</h2>
+                <p className="text-xs text-[var(--muted)]">Eventos opcionales listos para agendar</p>
+              </div>
+              <span className="inline-flex items-center rounded-full bg-slate-900/10 px-3 py-1 text-xs font-semibold text-slate-700">
+                {waitlistTotal}
+              </span>
+            </div>
           </div>
-        ) : null}
+          <div
+            className="flex-1 overflow-y-auto px-4 py-4"
+            style={{ maxHeight: 'calc(100vh - 240px)' }}
+          >
+            {waitlistTotal === 0 ? (
+              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2 text-center text-sm text-[var(--muted)]">
+                <p>No hay eventos opcionales en la lista de espera.</p>
+                <p className="text-xs">
+                  Cuando agregues sugerencias opcionales, aparecerán aquí para agendarlas rápidamente.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {waitlistGroups.map((group) => (
+                  <section key={group.category} className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-[var(--fg)]">{group.category}</h3>
+                      <span className="text-xs font-medium text-[var(--muted)]">
+                        {group.events.length} {group.events.length === 1 ? 'evento' : 'eventos'}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {group.events.map((event) => {
+                        const suggestion = formatSuggestedTime(event);
+                        const windowText = formatWindow(event);
+                        const durationText = formatDuration(event);
+                        const kindLabel = KIND_LABELS[event.kind] ?? event.kind;
+                        const isActive = waitlistPromotingId === event.id;
+                        const isPromoting = creating && isActive;
+                        return (
+                          <article
+                            key={event.id}
+                            className="rounded-2xl border border-slate-200/70 bg-white/70 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                                  <span className="inline-flex items-center rounded-full bg-slate-900/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                                    {kindLabel}
+                                  </span>
+                                  <span className="text-indigo-500">Opcional</span>
+                                </div>
+                                <h4 className="text-sm font-semibold text-[var(--fg)]">{event.title}</h4>
+                                {event.description ? (
+                                  <p className="text-xs text-[var(--muted)]">{event.description}</p>
+                                ) : null}
+                                <dl className="space-y-1 text-xs text-[var(--muted)]">
+                                  {suggestion ? (
+                                    <div>
+                                      <dt className="sr-only">Sugerencia</dt>
+                                      <dd>{suggestion}</dd>
+                                    </div>
+                                  ) : null}
+                                  {windowText ? (
+                                    <div>
+                                      <dt className="sr-only">Ventana sugerida</dt>
+                                      <dd>Ventana: {windowText}</dd>
+                                    </div>
+                                  ) : null}
+                                  {durationText ? (
+                                    <div>
+                                      <dt className="sr-only">Duración estimada</dt>
+                                      <dd>Duración: {durationText}</dd>
+                                    </div>
+                                  ) : null}
+                                </dl>
+                              </div>
+                              <button
+                                type="button"
+                                className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                onClick={() => handleScheduleFromWaitlist(event)}
+                                disabled={creating || isActive}
+                              >
+                                {isPromoting ? 'Agendando…' : isActive ? 'Configurando…' : 'Agendar'}
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
 
 
@@ -722,8 +1041,14 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
         open={openCreate}
         mode="create"
         initialTab="evento"
+        initialValues={createInitial ?? undefined}
         onSubmit={handleCreateFromModal}
-        onClose={() => setOpenCreate(false)}
+        onClose={() => {
+          setOpenCreate(false);
+          setCreateInitial(null);
+          waitlistPromoteRef.current = null;
+          setWaitlistPromotingId(null);
+        }}
       />
 
       {/* Modal Editar */}
