@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
 import {
+  DAY_CODE_TO_WEEKDAY_INDEX,
+  mergeUserSettings,
+  parseEnabledDaysField,
+  timeStringToParts,
+} from '@/lib/user-settings';
+import {
   AvailabilityWindow,
   Priority,
   RepeatRule,
@@ -352,8 +358,141 @@ type BusyInterval = { start: Date; end: Date };
 type WeightedBusyInterval = BusyInterval & { weight: number };
 
 const DEFAULT_DURATION_MINUTES = 60;
-const WORK_START_HOUR = 5;
-const WORK_END_HOUR = 23;
+
+type SchedulingPreferences = {
+  startHour: number;
+  startMinute: number;
+  endHour: number;
+  endMinute: number;
+  bufferMinutes: number;
+  leadMinutes: number;
+  enabledWeekdays: Set<number>;
+};
+
+type SchedulingContext = SchedulingPreferences & { earliestStart: Date };
+
+async function loadSchedulingPreferences(userId: string): Promise<SchedulingPreferences> {
+  const record = await prisma.userSettings.findUnique({ where: { userId } });
+  const settings = record
+    ? mergeUserSettings({
+        dayStart: record.dayStart,
+        dayEnd: record.dayEnd,
+        enabledDays: parseEnabledDaysField(record.enabledDays),
+        eventBufferMinutes: record.eventBufferMinutes,
+        schedulingLeadMinutes: record.schedulingLeadMinutes,
+      })
+    : mergeUserSettings();
+
+  const { hour: startHour, minute: startMinute } = timeStringToParts(settings.dayStart);
+  const { hour: endHour, minute: endMinute } = timeStringToParts(settings.dayEnd);
+
+  const enabledWeekdays = new Set<number>(
+    settings.enabledDays
+      .map((code) => DAY_CODE_TO_WEEKDAY_INDEX[code])
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6),
+  );
+
+  if (enabledWeekdays.size === 0) {
+    for (let i = 0; i < 7; i += 1) {
+      enabledWeekdays.add(i);
+    }
+  }
+
+  return {
+    startHour,
+    startMinute,
+    endHour,
+    endMinute,
+    bufferMinutes: settings.eventBufferMinutes,
+    leadMinutes: settings.schedulingLeadMinutes,
+    enabledWeekdays,
+  };
+}
+
+function buildSchedulingContext(prefs: SchedulingPreferences): SchedulingContext {
+  const earliestStart = new Date(Date.now() + prefs.leadMinutes * 60_000);
+  return { ...prefs, earliestStart };
+}
+
+function isoDayFromJsDay(day: number): number {
+  return (day + 6) % 7;
+}
+
+function isEnabledDay(date: Date, context: SchedulingContext): boolean {
+  const isoIndex = isoDayFromJsDay(date.getDay());
+  return context.enabledWeekdays.has(isoIndex);
+}
+
+function startOfWorkingDay(date: Date, context: SchedulingContext): Date {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    context.startHour,
+    context.startMinute,
+    0,
+    0,
+  );
+}
+
+function endOfWorkingDay(date: Date, context: SchedulingContext): Date {
+  const end = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    context.endHour,
+    context.endMinute,
+    0,
+    0,
+  );
+  const start = startOfWorkingDay(date, context);
+  if (end.getTime() <= start.getTime()) {
+    const next = new Date(start);
+    next.setDate(next.getDate() + 1);
+    return next;
+  }
+  return end;
+}
+
+function ensureEarliest(date: Date, context: SchedulingContext): Date {
+  const time = Math.max(date.getTime(), context.earliestStart.getTime());
+  return new Date(time);
+}
+
+function moveToNextWorkingDay(date: Date, context: SchedulingContext): Date {
+  const next = new Date(date);
+  next.setHours(context.startHour, context.startMinute, 0, 0);
+  do {
+    next.setDate(next.getDate() + 1);
+  } while (!isEnabledDay(next, context));
+  return ensureEarliest(next, context);
+}
+
+function clampToWorkingHours(date: Date, context: SchedulingContext): Date {
+  let candidate = ensureEarliest(date, context);
+
+  while (true) {
+    if (!isEnabledDay(candidate, context)) {
+      candidate = moveToNextWorkingDay(candidate, context);
+      continue;
+    }
+
+    const dayStart = startOfWorkingDay(candidate, context);
+    const dayEnd = endOfWorkingDay(candidate, context);
+
+    if (candidate.getTime() < dayStart.getTime()) {
+      candidate = ensureEarliest(dayStart, context);
+      continue;
+    }
+
+    if (candidate.getTime() >= dayEnd.getTime()) {
+      candidate = moveToNextWorkingDay(candidate, context);
+      continue;
+    }
+
+    return candidate;
+  }
+}
 
 function ensurePositiveDurationMs(event: Event): number {
   if (event.start && event.end) {
@@ -368,51 +507,7 @@ function isUnsetDate(value: Date | null | undefined): boolean {
   return !value || value.getTime() === 0;
 }
 
-function startOfWorkingDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), WORK_START_HOUR, 0, 0, 0);
-}
-
-function endOfWorkingDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), WORK_END_HOUR, 0, 0, 0);
-}
-
-function earliestSchedulingStart(): Date {
-  const now = new Date();
-  const todayStart = startOfWorkingDay(now);
-  return now.getTime() > todayStart.getTime() ? now : todayStart;
-}
-
-function moveToNextWorkingDay(date: Date): Date {
-  const next = new Date(date);
-  next.setDate(next.getDate() + 1);
-  next.setHours(WORK_START_HOUR, 0, 0, 0);
-  const earliest = earliestSchedulingStart();
-  return next.getTime() < earliest.getTime() ? earliest : next;
-}
-
-function clampToWorkingHours(date: Date): Date {
-  const earliest = earliestSchedulingStart();
-  let candidate = new Date(Math.max(date.getTime(), earliest.getTime()));
-
-  while (true) {
-    const dayStart = startOfWorkingDay(candidate);
-    const dayEnd = endOfWorkingDay(candidate);
-
-    if (candidate.getTime() < dayStart.getTime()) {
-      candidate = dayStart;
-      continue;
-    }
-
-    if (candidate.getTime() >= dayEnd.getTime()) {
-      candidate = moveToNextWorkingDay(candidate);
-      continue;
-    }
-
-    return candidate;
-  }
-}
-
-function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | null {
+function schedulingWindowOf(event: Event, context: SchedulingContext): { start: Date; end: Date | null } | null {
   const now = new Date();
   const candidates: Date[] = [];
   if (event.start) candidates.push(event.start);
@@ -458,29 +553,53 @@ function schedulingWindowOf(event: Event): { start: Date; end: Date | null } | n
     }
   }
 
-  const clampedStart = clampToWorkingHours(start);
+  const clampedStart = clampToWorkingHours(start, context);
 
-  if (end && end.getTime() <= clampedStart.getTime()) {
+  if (end) {
+    const normalizedEnd = new Date(Math.max(end.getTime(), context.earliestStart.getTime()));
+    if (normalizedEnd.getTime() <= clampedStart.getTime()) {
+      return null;
+    }
+    return { start: clampedStart, end: normalizedEnd };
+  }
+
+  return { start: clampedStart, end: null };
+}
+
+function findNextSlot(
+  durationMs: number,
+  start: Date,
+  end: Date | null,
+  busy: BusyInterval[],
+  context: SchedulingContext,
+): Date | null {
+  const sorted = [...busy].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const bufferMs = context.bufferMinutes > 0 ? context.bufferMinutes * 60_000 : 0;
+  const limit = end ? Math.max(end.getTime(), context.earliestStart.getTime()) : Number.POSITIVE_INFINITY;
+
+  if (limit <= context.earliestStart.getTime()) {
     return null;
   }
 
-  return { start: clampedStart, end };
-}
-
-function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: BusyInterval[]): Date | null {
-  const sorted = [...busy].sort((a, b) => a.start.getTime() - b.start.getTime());
-  let cursor = clampToWorkingHours(start);
-  const limit = end ? end.getTime() : Number.POSITIVE_INFINITY;
+  let cursor = clampToWorkingHours(start, context);
 
   if (cursor.getTime() >= limit) {
     return null;
   }
 
   while (cursor.getTime() + durationMs <= limit) {
-    const dayEnd = endOfWorkingDay(cursor);
+    const dayEnd = endOfWorkingDay(cursor, context);
 
     if (cursor.getTime() + durationMs > dayEnd.getTime()) {
-      cursor = moveToNextWorkingDay(cursor);
+      cursor = moveToNextWorkingDay(cursor, context);
+      if (cursor.getTime() >= limit) {
+        return null;
+      }
+      continue;
+    }
+
+    if (bufferMs && cursor.getTime() + durationMs + bufferMs > dayEnd.getTime()) {
+      cursor = moveToNextWorkingDay(cursor, context);
       if (cursor.getTime() >= limit) {
         return null;
       }
@@ -488,13 +607,19 @@ function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: B
     }
 
     let conflict: BusyInterval | null = null;
+    const candidateStart = cursor.getTime();
+    const candidateEnd = candidateStart + durationMs;
+
     for (const interval of sorted) {
-      if (interval.end.getTime() <= cursor.getTime()) {
-        continue;
+      const busyStart = interval.start.getTime();
+      const busyEnd = interval.end.getTime();
+
+      if (candidateEnd <= busyStart - bufferMs) {
+        break;
       }
 
-      if (interval.start.getTime() >= cursor.getTime() + durationMs) {
-        break;
+      if (candidateStart >= busyEnd + bufferMs) {
+        continue;
       }
 
       conflict = interval;
@@ -505,7 +630,8 @@ function findNextSlot(durationMs: number, start: Date, end: Date | null, busy: B
       return cursor;
     }
 
-    cursor = clampToWorkingHours(new Date(Math.max(conflict.end.getTime(), cursor.getTime())));
+    const nextStart = new Date(Math.max(conflict.end.getTime() + bufferMs, candidateStart + 60_000));
+    cursor = clampToWorkingHours(nextStart, context);
   }
 
   return null;
@@ -535,7 +661,11 @@ function lowerPriorityTargets(priority: Priority): Priority[] {
   return SCHEDULABLE_PRIORITIES.filter((candidate) => priorityWeight(candidate) > 0 && priorityWeight(candidate) < base);
 }
 
-async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
+async function preemptLowerPriorityEvents(
+  userId: string,
+  newEvents: Event[],
+  context: SchedulingContext,
+) {
   for (const current of newEvents) {
     if (current.kind !== 'EVENTO' || !current.start || !current.end) continue;
 
@@ -585,7 +715,7 @@ async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
     const updates: { id: string; data: Prisma.EventUpdateInput }[] = [];
 
     for (const event of sortedOverlaps) {
-      const window = schedulingWindowOf(event);
+      const window = schedulingWindowOf(event, context);
       if (!window) {
         updates.push({
           id: event.id,
@@ -600,7 +730,7 @@ async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
       }
 
       const durationMs = ensurePositiveDurationMs(event);
-      const nextSlot = findNextSlot(durationMs, window.start, window.end, busy);
+      const nextSlot = findNextSlot(durationMs, window.start, window.end, busy, context);
 
       if (!nextSlot) {
         updates.push({
@@ -634,7 +764,11 @@ async function preemptLowerPriorityEvents(userId: string, newEvents: Event[]) {
   }
 }
 
-async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
+async function scheduleFlexibleEvents(
+  userId: string,
+  candidates: Event[],
+  context: SchedulingContext,
+) {
   const toSchedule = candidates.filter(
     (event) =>
       event.kind === 'EVENTO' &&
@@ -676,7 +810,7 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
   const updates: { id: string; data: Prisma.EventUpdateInput }[] = [];
 
   for (const event of sorted) {
-    const window = schedulingWindowOf(event);
+    const window = schedulingWindowOf(event, context);
     if (!window) {
       updates.push({
         id: event.id,
@@ -695,7 +829,7 @@ async function scheduleFlexibleEvents(userId: string, candidates: Event[]) {
     const effectiveBusy = busy
       .filter((interval) => interval.weight >= candidateWeight)
       .map(({ start, end }) => ({ start, end }));
-    const nextSlot = findNextSlot(durationMs, window.start, window.end, effectiveBusy);
+    const nextSlot = findNextSlot(durationMs, window.start, window.end, effectiveBusy, context);
 
     if (!nextSlot) {
       updates.push({
@@ -1227,12 +1361,14 @@ export async function POST(req: Request) {
 
     let items: Event[];
     if (data.kind === 'EVENTO') {
+      const schedulingPreferences = await loadSchedulingPreferences(user.id);
+      const schedulingContext = buildSchedulingContext(schedulingPreferences);
       const normalized = applyPriorityPolicyToEventCreate({ ...data, calendarId: calendarIdToUse });
       const created = await createEventSeries(user.id, normalized);
-      await scheduleFlexibleEvents(user.id, created);
+      await scheduleFlexibleEvents(user.id, created, schedulingContext);
       const createdIds = created.map((item) => item.id);
       const scheduled = await prisma.event.findMany({ where: { id: { in: createdIds } } });
-      await preemptLowerPriorityEvents(user.id, scheduled);
+      await preemptLowerPriorityEvents(user.id, scheduled, schedulingContext);
       const refreshed = await prisma.event.findMany({ where: { id: { in: createdIds } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
