@@ -101,6 +101,12 @@ function ensureDurationMs(start: Date, end: Date | null, isAllDay: boolean): num
     return HOUR_MS;
 }
 
+function dayWindowFor(date: Date): { windowStart: Date; windowEnd: Date } {
+    const windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+    const windowEnd = new Date(windowStart.getTime() + DAY_MS);
+    return { windowStart, windowEnd };
+}
+
 function toAllDayBounds(start: Date, end: Date | null): { start: Date; end: Date } {
     const startUtc = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
 
@@ -347,6 +353,8 @@ export async function importIcsFromText(
             continue;
         }
 
+        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(start);
+
         const smartBase = {
             userId: user.id,
             calendarId: calendar.id,
@@ -364,26 +372,38 @@ export async function importIcsFromText(
             sequence,
             category: null,
             status: 'WAITLIST' as const,
-            window: 'NONE' as const,
-            windowStart: null,
-            windowEnd: null,
+            window: 'RANGO' as const,
+            windowStart: baseWindowStart,
+            windowEnd: baseWindowEnd,
         };
 
         const smartDurationMinutes = Math.max(1, Math.round(durationMs / 60000));
         const hasRrule = !!rrule;
         const rruleCount = extractCountFromRRULE(rrule);
         let occurrenceCount = 1;
+        let occurrenceDates: Date[] = [];
 
         if (hasRrule) {
+            const event = new ICAL.Event(comp);
+            const iterator = event.iterator();
+            let next: any;
             if (rruleCount) {
                 occurrenceCount = rruleCount;
+                while (occurrenceDates.length < occurrenceCount && (next = iterator.next())) {
+                    occurrenceDates.push(next.toJSDate());
+                }
             } else {
                 const now = new Date();
                 const until = new Date(now);
                 until.setUTCMonth(until.getUTCMonth() + (expandMonths || 6));
                 const occurrences = expandOccurrences(comp, until);
                 occurrenceCount = occurrences.length ? occurrences.length : 1;
+                occurrenceDates = occurrences;
             }
+        }
+
+        if (!occurrenceDates.length) {
+            occurrenceDates = [start];
         }
 
         const baseEventData = {
@@ -396,19 +416,31 @@ export async function importIcsFromText(
         };
 
         if (occurrenceCount <= 1) {
+            const { windowStart, windowEnd } = dayWindowFor(occurrenceDates[0] ?? start);
             if (whereByUid) {
                 const saved = await prisma.event.upsert({
                     where: whereByUid,
                     update: {
                         ...baseEventData,
+                        windowStart,
+                        windowEnd,
                         originEventId: null,
                     },
-                    create: uid ? { ...baseEventData, uid } : baseEventData,
+                    create: uid
+                        ? { ...baseEventData, uid, windowStart, windowEnd }
+                        : { ...baseEventData, windowStart, windowEnd },
                 });
                 importedIds.push(saved.id);
                 schedulingCandidates.push(saved);
             } else {
-                const saved = await prisma.event.create({ data: baseEventData });
+                const saved = await prisma.event.create({
+                    data: {
+                        ...baseEventData,
+                        windowStart,
+                        windowEnd,
+                    },
+                    create: uid ? { ...baseEventData, uid } : baseEventData,
+                });
                 importedIds.push(saved.id);
                 schedulingCandidates.push(saved);
             }
@@ -436,8 +468,12 @@ export async function importIcsFromText(
 
         let master: DbEvent | null = null;
         for (let index = 0; index < occurrenceCount; index += 1) {
+            const occurrence = occurrenceDates[index] ?? addDays(start, index);
+            const { windowStart, windowEnd } = dayWindowFor(occurrence);
             const data = {
                 ...baseEventData,
+                windowStart,
+                windowEnd,
                 ...(index === 0 && uid ? { uid } : {}),
                 ...(master ? { originEventId: master.id } : {}),
             };
