@@ -16,8 +16,11 @@ import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/Eve
 import { THEMES, currentTheme } from '@/theme/themes';
 import {
   DEFAULT_USER_SETTINGS,
+  JS_DAY_TO_DAY_CODE,
+  dayCodesToWeekdayIndexes,
   hhmmToFullCalendar,
   timeStringToParts,
+  type DayCode,
   type UserSettingsValues,
 } from '@/lib/user-settings';
 import {
@@ -54,6 +57,7 @@ type EventRow = {
   window?: 'NONE' | 'PRONTO' | 'SEMANA' | 'MES' | 'RANGO' | null;
   windowStart?: string | null;
   windowEnd?: string | null;
+  durationMinutes?: number | null;
 };
 
 type ModalInitialEvent = {
@@ -67,6 +71,7 @@ type ModalInitialEvent = {
   date: string;
   timeStart: string;
   timeEnd: string;
+  durationHours: string;
 };
 
 type ModalInitialReminder = {
@@ -132,6 +137,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [rows, setRows] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [enabledDayCodes, setEnabledDayCodes] = useState<DayCode[]>(
+    DEFAULT_USER_SETTINGS.enabledDays,
+  );
 
   const defaultStartParts = timeStringToParts(DEFAULT_USER_SETTINGS.dayStart);
   const defaultEndParts = timeStringToParts(DEFAULT_USER_SETTINGS.dayEnd);
@@ -199,7 +207,12 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         setSlotMinTime(hasValidRange ? hhmmToFullCalendar(data.dayStart) : '00:00:00');
         setSlotMaxTime(hasValidRange ? hhmmToFullCalendar(data.dayEnd) : '24:00:00');
 
-        const hasWeekend = data.enabledDays?.some((d) => d === 'sat' || d === 'sun');
+        const enabledCodes = Array.isArray(data.enabledDays)
+          ? (data.enabledDays as DayCode[])
+          : DEFAULT_USER_SETTINGS.enabledDays;
+        setEnabledDayCodes(enabledCodes);
+
+        const hasWeekend = enabledCodes.some((code) => code === 'sat' || code === 'sun');
         setWeekends(Boolean(hasWeekend));
       } catch (err) {
         console.error('Error cargando configuración', err);
@@ -208,6 +221,31 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
     loadSettings();
   }, []);
+
+  const disabledWeekdayIndexes = useMemo(() => {
+    const enabledIndexes = new Set(dayCodesToWeekdayIndexes(enabledDayCodes));
+    const disabled: number[] = [];
+    for (let i = 0; i < 7; i += 1) {
+      if (!enabledIndexes.has(i)) {
+        disabled.push(i);
+      }
+    }
+    return disabled;
+  }, [enabledDayCodes]);
+
+  const disabledJsDayIndexes = useMemo(() => {
+    if (!disabledWeekdayIndexes.length) return [] as number[];
+    const disabledSet = new Set(disabledWeekdayIndexes);
+    const jsIndexes: number[] = [];
+    JS_DAY_TO_DAY_CODE.forEach((code, jsIndex) => {
+      if (!code) return;
+      const weekdayIndex = dayCodesToWeekdayIndexes([code as DayCode])[0];
+      if (disabledSet.has(weekdayIndex)) {
+        jsIndexes.push(jsIndex);
+      }
+    });
+    return jsIndexes;
+  }, [disabledWeekdayIndexes]);
 
   // ====== Crear desde el modal ======
   async function handleCreateFromModal(payload: CreateModalSubmitPayload) {
@@ -288,6 +326,13 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }
 
 function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | null {
+  const minutesToHourString = (minutes?: number | null) => {
+    if (!minutes || minutes <= 0) return '';
+    const hours = minutes / 60;
+    const rounded = Math.round(hours * 100) / 100;
+    return rounded.toString();
+  };
+
   // Si es TAREA
   if (row.kind === 'TAREA') {
     return null;
@@ -313,6 +358,11 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   // Si es EVENTO
   const startDate = row.start ? isoToDate(row.start) : null;
   const endDate = row.end ? isoToDate(row.end) : null;
+  const directDuration = typeof row.durationMinutes === 'number' ? row.durationMinutes : null;
+  const inferredDuration = startDate && endDate && endDate > startDate
+    ? Math.round((endDate.getTime() - startDate.getTime()) / 60000)
+    : null;
+  const durationForForm = directDuration && directDuration > 0 ? directDuration : inferredDuration;
 
   // ✅ DEBUG
   console.debug('START en mapRowToEditInitial', debugDateFull(startDate, timeZone));
@@ -330,103 +380,133 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
     date: dateToDateStringLocal(startDate, timeZone),
     timeStart: dateToTimeStringLocal(startDate, timeZone),
     timeEnd: dateToTimeStringLocal(endDate, timeZone),
+    durationHours: minutesToHourString(durationForForm) || '1',
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======
   const fcEvents = useMemo<EventInput[]>(() => {
-    if (!rows.length) return [];
     const out: EventInput[] = [];
 
-    const labelColors = THEMES[theme].labels;
-    const labelFgs = THEMES[theme].labelsFg;
+    if (rows.length) {
+      const labelColors = THEMES[theme].labels;
+      const labelFgs = THEMES[theme].labelsFg;
 
-    for (const row of rows) {
-      const kind = row.kind || 'EVENTO';
-      const startStr = row.start || null;
-      const endStr = row.end || null;
-      const dueStr = row.dueDate || null;
-      const windowCode = row.window || 'NONE';
-      const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
-      const classNames = [`prio-${p}`];
+      for (const row of rows) {
+        const kind = row.kind || 'EVENTO';
+        const startStr = row.start || null;
+        const endStr = row.end || null;
+        const dueStr = row.dueDate || null;
+        const windowCode = row.window || 'NONE';
+        const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
+        const classNames = [`prio-${p}`];
 
-      // 1) Eventos con start/end
-      if (startStr) {
-        if (row.isAllDay) {
-          const sDay = toDateOnly(startStr)!;
-          const eDay = endStr ? toDateOnly(endStr)! : undefined;
-          out.push({
-            id: row.id,
-            title: row.title,
-            start: sDay,
-            end: eDay,
-            allDay: true,
-            classNames,
-            color: labelColors[p],
-            textColor: labelFgs[p],
-            extendedProps: { kind, priority: row.priority, raw: row },
-          });
-        } else {
-          out.push({
-            id: row.id,
-            title: row.title,
-            start: startStr,
-            end: endStr ?? undefined,
-            allDay: !!row.isAllDay,
-            classNames,
-            color: labelColors[p],
-            textColor: labelFgs[p],
-            extendedProps: { kind, priority: row.priority, raw: row },
-          });
+        // 1) Eventos con start/end
+        if (startStr) {
+          if (row.isAllDay) {
+            const sDay = toDateOnly(startStr)!;
+            const eDay = endStr ? toDateOnly(endStr)! : undefined;
+            out.push({
+              id: row.id,
+              title: row.title,
+              start: sDay,
+              end: eDay,
+              allDay: true,
+              classNames,
+              color: labelColors[p],
+              textColor: labelFgs[p],
+              extendedProps: { kind, priority: row.priority, raw: row },
+            });
+          } else {
+            out.push({
+              id: row.id,
+              title: row.title,
+              start: startStr,
+              end: endStr ?? undefined,
+              allDay: !!row.isAllDay,
+              classNames,
+              color: labelColors[p],
+              textColor: labelFgs[p],
+              extendedProps: { kind, priority: row.priority, raw: row },
+            });
+          }
+          continue;
         }
-        continue;
-      }
 
-      // 2) Tareas con dueDate -> allDay ese día
-      if (kind === 'TAREA' && dueStr) {
-        out.push({
-          id: row.id,
-          title: `🗒️ ${row.title}`,
-          start: toDateOnly(dueStr)!,
-          allDay: true,
-          classNames,
-          color: labelColors[p],
-          textColor: labelFgs[p],
-          extendedProps: { kind, priority: row.priority, raw: row },
-        });
-        continue;
-      }
-
-      // 3) Ventanas visuales opcionales
-      if (windowCode && windowCode !== 'NONE') {
-        if (windowCode === 'RANGO' && row.windowStart) {
-          const sDay = toDateOnly(row.windowStart)!;
-          const eDay = row.windowEnd ? toDateOnly(row.windowEnd)! : undefined;
+        // 2) Tareas con dueDate -> allDay ese día
+        if (kind === 'TAREA' && dueStr) {
           out.push({
-            id: `${row.id}-win`,
-            title: row.title,
-            start: sDay,
-            end: eDay,
-            display: 'background',
-            classNames: ['bg-window-range'],
+            id: row.id,
+            title: `🗒️ ${row.title}`,
+            start: toDateOnly(dueStr)!,
             allDay: true,
-            extendedProps: { kind, priority: row.priority, raw: row, isWindow: true },
+            classNames,
+            color: labelColors[p],
+            textColor: labelFgs[p],
+            extendedProps: { kind, priority: row.priority, raw: row },
           });
-        } else if (visibleRange) {
-          out.push({
-            id: `${row.id}-winv`,
-            title: row.title,
-            start: visibleRange.start,
-            end: visibleRange.end,
-            display: 'background',
-            classNames: ['bg-window-soft'],
-            extendedProps: { kind, priority: row.priority, raw: row, isWindow: true, code: windowCode },
-          });
+          continue;
+        }
+
+        // 3) Ventanas visuales opcionales
+        if (windowCode && windowCode !== 'NONE') {
+          if (windowCode === 'RANGO' && row.windowStart) {
+            const sDay = toDateOnly(row.windowStart)!;
+            const eDay = row.windowEnd ? toDateOnly(row.windowEnd)! : undefined;
+            out.push({
+              id: `${row.id}-win`,
+              title: row.title,
+              start: sDay,
+              end: eDay,
+              display: 'background',
+              classNames: ['bg-window-range'],
+              allDay: true,
+              extendedProps: { kind, priority: row.priority, raw: row, isWindow: true },
+            });
+          } else if (visibleRange) {
+            out.push({
+              id: `${row.id}-winv`,
+              title: row.title,
+              start: visibleRange.start,
+              end: visibleRange.end,
+              display: 'background',
+              classNames: ['bg-window-soft'],
+              extendedProps: { kind, priority: row.priority, raw: row, isWindow: true, code: windowCode },
+            });
+          }
+        }
+      }
+    }
+
+    if (visibleRange && disabledJsDayIndexes.length) {
+      const disabledSet = new Set(disabledJsDayIndexes);
+      if (disabledSet.size) {
+        const cursor = new Date(visibleRange.start);
+        cursor.setHours(0, 0, 0, 0);
+        const end = new Date(visibleRange.end);
+        end.setHours(0, 0, 0, 0);
+
+        while (cursor < end) {
+          const jsDay = cursor.getDay();
+          if (disabledSet.has(jsDay)) {
+            const start = new Date(cursor);
+            const finish = new Date(cursor);
+            finish.setDate(finish.getDate() + 1);
+            out.push({
+              id: `disabled-${start.toISOString()}`,
+              start,
+              end: finish,
+              display: 'background',
+              classNames: ['fc-day-disabled-overlay'],
+              allDay: true,
+            });
+          }
+          cursor.setDate(cursor.getDate() + 1);
         }
       }
     }
 
     return out;
-  }, [rows, visibleRange, theme]);
+  }, [rows, visibleRange, theme, disabledJsDayIndexes]);
 
   // Navegación
   const changeView = (v: ViewId) => {
