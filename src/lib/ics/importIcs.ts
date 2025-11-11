@@ -101,8 +101,25 @@ function ensureDurationMs(start: Date, end: Date | null, isAllDay: boolean): num
     return HOUR_MS;
 }
 
-function dayWindowFor(date: Date): { windowStart: Date; windowEnd: Date } {
+function isoDayFromJsDay(day: number): number {
+    return (day + 6) % 7;
+}
+
+function dayWindowFor(
+    date: Date,
+    enabledWeekdays?: Set<number>,
+): { windowStart: Date; windowEnd: Date } | null {
     const windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+
+    if (!enabledWeekdays || enabledWeekdays.size === 0 || enabledWeekdays.size >= 7) {
+        const windowEnd = new Date(windowStart.getTime() + DAY_MS);
+        return { windowStart, windowEnd };
+    }
+
+    if (!enabledWeekdays.has(isoDayFromJsDay(windowStart.getDay()))) {
+        return null;
+    }
+
     const windowEnd = new Date(windowStart.getTime() + DAY_MS);
     return { windowStart, windowEnd };
 }
@@ -120,38 +137,6 @@ function toAllDayBounds(start: Date, end: Date | null): { start: Date; end: Date
     }
 
     return { start: startUtc, end: endUtc };
-}
-
-function startOfUtcDay(date: Date): Date {
-    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function computeDayOffsets(dates: Date[], count: number): number[] {
-    if (!count || count <= 0) {
-        return [];
-    }
-
-    if (!dates.length) {
-        return Array.from({ length: count }, (_, index) => index);
-    }
-
-    const origin = startOfUtcDay(dates[0]!);
-    const offsets = dates.map((date) => {
-        const day = startOfUtcDay(date);
-        const diff = Math.round((day.getTime() - origin.getTime()) / DAY_MS);
-        return diff >= 0 ? diff : 0;
-    });
-
-    if (offsets.length >= count) {
-        return offsets.slice(0, count);
-    }
-
-    const extended = [...offsets];
-    while (extended.length < count) {
-        const last = extended[extended.length - 1] ?? 0;
-        extended.push(last + 1);
-    }
-    return extended;
 }
 
 function allDayBoundsFromDate(start: Date, durationMs: number): { start: Date; end: Date } {
@@ -207,6 +192,28 @@ function expandOccurrences(comp: any, until: Date): Date[] {
         dates.push(next.toJSDate());
     }
     return dates;
+}
+
+async function removeExistingSeries(calendarId: string, uid: string) {
+    const existing = await prisma.event.findFirst({
+        where: {
+            calendarId,
+            uid,
+        },
+    });
+
+    if (!existing) {
+        return;
+    }
+
+    await prisma.event.deleteMany({
+        where: {
+            OR: [
+                { id: existing.id },
+                { originEventId: existing.id },
+            ],
+        },
+    });
 }
 
 /**
@@ -301,22 +308,7 @@ export async function importIcsFromText(
 
             if (hasReminderRrule) {
                 if (uid) {
-                    const existing = await prisma.event.findFirst({
-                        where: {
-                            calendarId: calendar.id,
-                            uid,
-                        },
-                    });
-                    if (existing) {
-                        await prisma.event.deleteMany({
-                            where: {
-                                OR: [
-                                    { id: existing.id },
-                                    { originEventId: existing.id },
-                                ],
-                            },
-                        });
-                    }
+                    await removeExistingSeries(calendar.id, uid);
                 }
 
                 const now = new Date();
@@ -388,7 +380,14 @@ export async function importIcsFromText(
             continue;
         }
 
-        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(start);
+        const baseWindow = dayWindowFor(start, prefs.enabledWeekdays);
+        if (!baseWindow) {
+            if (uid) {
+                await removeExistingSeries(calendar.id, uid);
+            }
+            continue;
+        }
+        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = baseWindow;
 
         const smartBase = {
             userId: user.id,
@@ -451,7 +450,14 @@ export async function importIcsFromText(
         };
 
         if (occurrenceCount <= 1) {
-            const { windowStart, windowEnd } = dayWindowFor(occurrenceDates[0] ?? start);
+            const singleWindow = dayWindowFor(occurrenceDates[0] ?? start, prefs.enabledWeekdays);
+            if (!singleWindow) {
+                if (uid) {
+                    await removeExistingSeries(calendar.id, uid);
+                }
+                continue;
+            }
+            const { windowStart, windowEnd } = singleWindow;
             if (whereByUid) {
                 const saved = await prisma.event.upsert({
                     where: whereByUid,
@@ -483,28 +489,17 @@ export async function importIcsFromText(
         }
 
         if (uid) {
-            const existing = await prisma.event.findFirst({
-                where: {
-                    calendarId: calendar.id,
-                    uid,
-                },
-            });
-            if (existing) {
-                await prisma.event.deleteMany({
-                    where: {
-                        OR: [
-                            { id: existing.id },
-                            { originEventId: existing.id },
-                        ],
-                    },
-                });
-            }
+            await removeExistingSeries(calendar.id, uid);
         }
 
         let master: DbEvent | null = null;
         for (let index = 0; index < occurrenceCount; index += 1) {
             const occurrence = occurrenceDates[index] ?? addDays(start, index);
-            const { windowStart, windowEnd } = dayWindowFor(occurrence);
+            const occurrenceWindow = dayWindowFor(occurrence, prefs.enabledWeekdays);
+            if (!occurrenceWindow) {
+                continue;
+            }
+            const { windowStart, windowEnd } = occurrenceWindow;
             const data = {
                 ...baseEventData,
                 windowStart,
@@ -519,41 +514,9 @@ export async function importIcsFromText(
             importedIds.push(created.id);
             schedulingCandidates.push(created);
         }
-
-        let master: DbEvent | null = null;
-        for (let index = 0; index < occurrenceCount; index += 1) {
-            const offsetDays = dayOffsets[index] ?? index;
-            const windowStart = new Date(anchor.getTime() + offsetDays * DAY_MS);
-            const data = {
-                ...baseEventData,
-                windowStart,
-                windowEnd: null,
-                ...(index === 0 && uid ? { uid } : {}),
-                ...(master ? { originEventId: master.id } : {}),
-            };
-            const created = await prisma.event.create({ data });
-            if (!master) {
-                master = created;
-            }
-            importedIds.push(created.id);
-            schedulingCandidates.push(created);
-        }
     }
 
     if (schedulingCandidates.length) {
-        await scheduleFlexibleEvents(user.id, schedulingCandidates, context);
-
-        const scheduled = await prisma.event.findMany({
-            where: { id: { in: schedulingCandidates.map((event) => event.id) } },
-        });
-
-        await preemptLowerPriorityEvents(user.id, scheduled, context);
-    }
-
-    if (schedulingCandidates.length) {
-        const prefs = await loadSchedulingPreferences(user.id);
-        const context = buildSchedulingContext(prefs);
-
         await scheduleFlexibleEvents(user.id, schedulingCandidates, context);
 
         const scheduled = await prisma.event.findMany({
