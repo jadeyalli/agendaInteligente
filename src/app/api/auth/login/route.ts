@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: 'Credenciales inválidas.' }, { status: 401 });
   }
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.set('sessionUser', user.id, {
     httpOnly: true,
     sameSite: 'lax',

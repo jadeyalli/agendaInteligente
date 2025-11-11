@@ -3,6 +3,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
+import {
+  DEFAULT_USER_SETTINGS,
+  JS_DAY_TO_DAY_CODE,
+  dayCodesToWeekdayIndexes,
+  mergeUserSettings,
+  parseEnabledDaysField,
+  timeStringToParts,
+  type DayCode,
+  type UserSettingsValues,
+} from '@/lib/user-settings';
 import { Priority } from '@prisma/client';
 import { spawn } from 'child_process';
 
@@ -70,11 +80,68 @@ async function runSolver(input: SolvePayload) {
 }
 
 // ———————————— Construye payload desde BD ————————————
+function clampDate(date: Date, min: Date, max: Date) {
+  const time = Math.min(Math.max(date.getTime(), min.getTime()), max.getTime());
+  return new Date(time);
+}
+
+function generatePreferredRanges(
+  horizonStart: Date,
+  horizonEnd: Date,
+  settings: UserSettingsValues,
+) {
+  const ranges: { start: string; end: string }[] = [];
+  const enabled = new Set<DayCode>(settings.enabledDays);
+  const { hour: startHour, minute: startMinute } = timeStringToParts(settings.dayStart);
+  const { hour: endHour, minute: endMinute } = timeStringToParts(settings.dayEnd);
+
+  const cursor = new Date(horizonStart);
+  cursor.setHours(0, 0, 0, 0);
+
+  while (cursor <= horizonEnd) {
+    const dayCode = JS_DAY_TO_DAY_CODE[cursor.getDay()];
+    if (dayCode && enabled.has(dayCode)) {
+      const dayStart = new Date(cursor);
+      dayStart.setHours(startHour, startMinute, 0, 0);
+      let dayEnd = new Date(cursor);
+      dayEnd.setHours(endHour, endMinute, 0, 0);
+
+      if (dayEnd <= dayStart) {
+        const fallbackStart = new Date(cursor);
+        fallbackStart.setHours(0, 0, 0, 0);
+        dayStart.setTime(fallbackStart.getTime());
+        dayEnd = new Date(fallbackStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+      }
+
+      const start = clampDate(dayStart, horizonStart, horizonEnd);
+      const end = clampDate(dayEnd, horizonStart, horizonEnd);
+      if (end.getTime() > start.getTime()) {
+        ranges.push({ start: toLocalISO(start), end: toLocalISO(end) });
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return ranges;
+}
+
 async function buildPayloadForUser(userId: string, extraNew?: any[]) {
   const tz = 'America/Mexico_City';
   const now = new Date();
   const horizonStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const horizonEnd = endOfMonth(now);
+
+  const rawSettings = await prisma.userSettings.findUnique({ where: { userId } });
+  const settings = rawSettings
+    ? mergeUserSettings({
+        dayStart: rawSettings.dayStart,
+        dayEnd: rawSettings.dayEnd,
+        enabledDays: parseEnabledDaysField(rawSettings.enabledDays),
+        eventBufferMinutes: rawSettings.eventBufferMinutes,
+        schedulingLeadMinutes: rawSettings.schedulingLeadMinutes,
+      })
+    : { ...DEFAULT_USER_SETTINGS };
 
   // Trae eventos del usuario
   const events = await prisma.event.findMany({
@@ -123,6 +190,11 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
     }
   }
 
+  const preferredRanges = generatePreferredRanges(horizonStart, horizonEnd, settings);
+  const activeDays = Array.from(new Set(dayCodesToWeekdayIndexes(settings.enabledDays))).sort(
+    (a, b) => a - b,
+  );
+
   const payload: SolvePayload = {
     user: { id: userId, timezone: tz },
     horizon: {
@@ -131,8 +203,8 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
       slotMinutes: 30,
     },
     availability: {
-      preferred: [],      // vacío → el solver usa el fallback (9–18h L–V, etc.)
-      fallbackUsed: true,
+      preferred: preferredRanges,
+      fallbackUsed: preferredRanges.length === 0,
     },
     events: {
       fixed,
@@ -147,9 +219,14 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
       crossDayPerEvent: { UnI: 2, InU: 1 },
     },
     policy: {
-      allowWeekend: false,
+      allowWeekend: activeDays.some((d) => d >= 5),
       noOverlapCapacity: 1,
       remoteCapacity: 9999,
+      dayStart: settings.dayStart,
+      dayEnd: settings.dayEnd,
+      activeDays,
+      eventBufferMinutes: settings.eventBufferMinutes,
+      schedulingLeadMinutes: settings.schedulingLeadMinutes,
     },
   };
 

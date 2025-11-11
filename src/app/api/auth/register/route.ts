@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     },
   });
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.set('sessionUser', user.id, {
     httpOnly: true,
     sameSite: 'lax',
