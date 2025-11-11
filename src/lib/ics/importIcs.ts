@@ -1,6 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import ICAL from 'ical.js';
 import { prisma } from '@/lib/prisma';
+import {
+  buildSchedulingContext,
+  loadSchedulingPreferences,
+  preemptLowerPriorityEvents,
+  scheduleFlexibleEvents,
+} from '@/lib/scheduling-engine';
 import type { Event as DbEvent } from '@prisma/client';
 
 type ImportMode = 'REMINDER' | 'SMART';
@@ -64,6 +70,14 @@ function inferRepeatFromRRULE(rrule?: string | null) {
     return 'NONE';
 }
 
+function extractCountFromRRULE(rrule?: string | null): number | null {
+    if (!rrule) return null;
+    const match = rrule.toUpperCase().match(/COUNT=(\d+)/);
+    if (!match) return null;
+    const value = Number(match[1]);
+    return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function addDays(date: Date, days: number) {
     const d = new Date(date.getTime());
     d.setUTCDate(d.getUTCDate() + days);
@@ -85,6 +99,12 @@ function ensureDurationMs(start: Date, end: Date | null, isAllDay: boolean): num
         return DAY_MS;
     }
     return HOUR_MS;
+}
+
+function dayWindowFor(date: Date): { windowStart: Date; windowEnd: Date } {
+    const windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+    const windowEnd = new Date(windowStart.getTime() + DAY_MS);
+    return { windowStart, windowEnd };
 }
 
 function toAllDayBounds(start: Date, end: Date | null): { start: Date; end: Date } {
@@ -186,6 +206,7 @@ export async function importIcsFromText(
     const calendar = await ensureCalendarForUser(user.id, { calendarId, calendarName });
 
     const importedIds: string[] = [];
+    const schedulingCandidates: DbEvent[] = [];
 
     for (const comp of vevents) {
         const uid = getText(comp.getFirstProperty('uid'));
@@ -212,7 +233,6 @@ export async function importIcsFromText(
             : null;
 
         const durationMs = ensureDurationMs(start, end ?? null, isAllDay);
-        const computedEnd = end ?? new Date(start.getTime() + durationMs);
 
         if (mode === 'REMINDER' || (mode === 'SMART' && isAllDay)) {
             const { start: allDayStart, end: allDayEnd } = toAllDayBounds(start, end ?? null);
@@ -333,6 +353,8 @@ export async function importIcsFromText(
             continue;
         }
 
+        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(start);
+
         const smartBase = {
             userId: user.id,
             calendarId: calendar.id,
@@ -349,119 +371,131 @@ export async function importIcsFromText(
             statusIcal,
             sequence,
             category: null,
-            status: 'SCHEDULED' as const,
-            window: 'NONE' as const,
-            windowStart: null,
-            windowEnd: null,
+            status: 'WAITLIST' as const,
+            window: 'RANGO' as const,
+            windowStart: baseWindowStart,
+            windowEnd: baseWindowEnd,
         };
 
         const smartDurationMinutes = Math.max(1, Math.round(durationMs / 60000));
         const hasRrule = !!rrule;
+        const rruleCount = extractCountFromRRULE(rrule);
+        let occurrenceCount = 1;
+        let occurrenceDates: Date[] = [];
 
         if (hasRrule) {
-            if (uid) {
-                const existing = await prisma.event.findFirst({
-                    where: {
-                        calendarId: calendar.id,
-                        uid,
-                    },
-                });
-                if (existing) {
-                    await prisma.event.deleteMany({
-                        where: {
-                            OR: [
-                                { id: existing.id },
-                                { originEventId: existing.id },
-                            ],
-                        },
-                    });
+            const event = new ICAL.Event(comp);
+            const iterator = event.iterator();
+            let next: any;
+            if (rruleCount) {
+                occurrenceCount = rruleCount;
+                while (occurrenceDates.length < occurrenceCount && (next = iterator.next())) {
+                    occurrenceDates.push(next.toJSDate());
                 }
+            } else {
+                const now = new Date();
+                const until = new Date(now);
+                until.setUTCMonth(until.getUTCMonth() + (expandMonths || 6));
+                const occurrences = expandOccurrences(comp, until);
+                occurrenceCount = occurrences.length ? occurrences.length : 1;
+                occurrenceDates = occurrences;
             }
+        }
 
-            const now = new Date();
-            const until = new Date(now);
-            until.setUTCMonth(until.getUTCMonth() + (expandMonths || 6));
+        if (!occurrenceDates.length) {
+            occurrenceDates = [start];
+        }
 
-            const occurrences = expandOccurrences(comp, until);
-            const ordered = occurrences.length ? occurrences.sort((a, b) => a.getTime() - b.getTime()) : [start];
+        const baseEventData = {
+            ...smartBase,
+            start: null,
+            end: null,
+            durationMinutes: smartDurationMinutes,
+            repeat: 'NONE' as const,
+            rrule: null,
+        };
 
-            const masterStart = ordered[0];
-            const masterEnd = new Date(masterStart.getTime() + durationMs);
-            const masterData = {
-                ...smartBase,
-                start: masterStart,
-                end: masterEnd,
-                durationMinutes: smartDurationMinutes,
-                repeat: repeat as any,
-                rrule: rrule ?? null,
-                ...(uid ? { uid } : {}),
-            };
-            const master = await prisma.event.create({ data: masterData });
-            importedIds.push(master.id);
-
-            const rest = ordered.slice(1);
-            for (const occ of rest) {
-                const occEnd = new Date(occ.getTime() + durationMs);
-                const child = await prisma.event.create({
+        if (occurrenceCount <= 1) {
+            const { windowStart, windowEnd } = dayWindowFor(occurrenceDates[0] ?? start);
+            if (whereByUid) {
+                const saved = await prisma.event.upsert({
+                    where: whereByUid,
+                    update: {
+                        ...baseEventData,
+                        windowStart,
+                        windowEnd,
+                        originEventId: null,
+                    },
+                    create: uid
+                        ? { ...baseEventData, uid, windowStart, windowEnd }
+                        : { ...baseEventData, windowStart, windowEnd },
+                });
+                importedIds.push(saved.id);
+                schedulingCandidates.push(saved);
+            } else {
+                const saved = await prisma.event.create({
                     data: {
-                        ...smartBase,
-                        originEventId: master.id,
-                        start: occ,
-                        end: occEnd,
-                        durationMinutes: smartDurationMinutes,
-                        repeat: 'NONE',
-                        rrule: null,
+                        ...baseEventData,
+                        windowStart,
+                        windowEnd,
                     },
                 });
-                importedIds.push(child.id);
+                importedIds.push(saved.id);
+                schedulingCandidates.push(saved);
             }
             continue;
         }
 
-        if (whereByUid) {
-            const saved = await prisma.event.upsert({
-                where: whereByUid,
-                update: {
-                    ...smartBase,
-                    start,
-                    end: computedEnd,
-                    durationMinutes: smartDurationMinutes,
-                    repeat: repeat as any,
-                    rrule: rrule ?? null,
-                },
-                create: uid
-                    ? {
-                          ...smartBase,
-                          start,
-                          end: computedEnd,
-                          durationMinutes: smartDurationMinutes,
-                          repeat: repeat as any,
-                          rrule: rrule ?? null,
-                          uid,
-                      }
-                    : {
-                          ...smartBase,
-                          start,
-                          end: computedEnd,
-                          durationMinutes: smartDurationMinutes,
-                          repeat: repeat as any,
-                          rrule: rrule ?? null,
-                      },
-            });
-            importedIds.push(saved.id);
-        } else {
-            const saved = await prisma.event.create({
-                data: {
-                    ...smartBase,
-                    start,
-                    end: computedEnd,
-                    durationMinutes: smartDurationMinutes,
-                    repeat: repeat as any,
-                    rrule: rrule ?? null,
+        if (uid) {
+            const existing = await prisma.event.findFirst({
+                where: {
+                    calendarId: calendar.id,
+                    uid,
                 },
             });
-            importedIds.push(saved.id);
+            if (existing) {
+                await prisma.event.deleteMany({
+                    where: {
+                        OR: [
+                            { id: existing.id },
+                            { originEventId: existing.id },
+                        ],
+                    },
+                });
+            }
         }
+
+        let master: DbEvent | null = null;
+        for (let index = 0; index < occurrenceCount; index += 1) {
+            const occurrence = occurrenceDates[index] ?? addDays(start, index);
+            const { windowStart, windowEnd } = dayWindowFor(occurrence);
+            const data = {
+                ...baseEventData,
+                windowStart,
+                windowEnd,
+                ...(index === 0 && uid ? { uid } : {}),
+                ...(master ? { originEventId: master.id } : {}),
+            };
+            const created = await prisma.event.create({ data });
+            if (!master) {
+                master = created;
+            }
+            importedIds.push(created.id);
+            schedulingCandidates.push(created);
+        }
+    }
+
+    if (schedulingCandidates.length) {
+        const prefs = await loadSchedulingPreferences(user.id);
+        const context = buildSchedulingContext(prefs);
+
+        await scheduleFlexibleEvents(user.id, schedulingCandidates, context);
+
+        const scheduled = await prisma.event.findMany({
+            where: { id: { in: schedulingCandidates.map((event) => event.id) } },
+        });
+
+        await preemptLowerPriorityEvents(user.id, scheduled, context);
     }
 
     return { importedIds };
