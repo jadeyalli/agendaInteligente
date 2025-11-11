@@ -213,7 +213,6 @@ export default function DashboardHomePage() {
           >
             <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="font-medium">{new Date().getFullYear()} · Agenda Inteligente</span>
-              <span className="text-xs uppercase tracking-[0.24em] text-slate-400">Organiza tu día con claridad</span>
             </div>
           </footer>
         </div>
