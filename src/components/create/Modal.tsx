@@ -42,6 +42,7 @@ type EventForm = {
   date?: string;
   timeStart?: string;
   timeEnd?: string;
+  durationHours: string;
 };
 
 type ReminderForm = {
@@ -75,6 +76,7 @@ type EventSubmitPayload = {
   status: "SCHEDULED" | "WAITLIST";
   tzid: string;
   calendarId?: string | null;
+  durationMinutes: number | null;
 };
 
 type ReminderSubmitPayload = {
@@ -232,6 +234,7 @@ const defaultEvent = (): EventForm => ({
   date: "",
   timeStart: "",
   timeEnd: "",
+  durationHours: "1",
 });
 
 const defaultReminder = (): ReminderForm => ({
@@ -253,6 +256,14 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
   const windowEndAt = f.window === "RANGO" ? dateStringToEndOfDay(f.windowEnd, timeZone) : null;
   const isAllDay = Boolean(f.date && !f.timeStart && !f.timeEnd);
 
+  const isUrgentOrRelevant = f.priority === "URGENTE" || f.priority === "RELEVANTE";
+  const parsedDuration = Number.parseFloat(f.durationHours ?? "");
+  const durationMinutes = isUrgentOrRelevant && Number.isFinite(parsedDuration) && parsedDuration > 0
+    ? Math.max(1, Math.round(parsedDuration * 60))
+    : startAt && endAt && endAt.getTime() > startAt.getTime()
+      ? Math.max(1, Math.round((endAt.getTime() - startAt.getTime()) / 60000))
+      : null;
+
   const base: EventSubmitPayload = {
     kind: "EVENTO",
     title: f.title.trim(),
@@ -271,6 +282,7 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
     status: "SCHEDULED",
     start: startAt,
     end: endAt,
+    durationMinutes,
   };
 
   switch (f.priority) {
@@ -282,6 +294,7 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
         transparency: "OPAQUE",
         start: startAt,
         end: endAt,
+        durationMinutes,
       };
     case "URGENTE":
     case "RELEVANTE":
@@ -290,6 +303,7 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
         isFixed: false,
         participatesInScheduling: true,
         transparency: "OPAQUE",
+        durationMinutes,
       };
     case "OPCIONAL":
       return {
@@ -301,6 +315,7 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
         window: "NONE",
         windowStart: null,
         windowEnd: null,
+        durationMinutes: null,
       };
     case "RECORDATORIO":
       return {
@@ -313,6 +328,7 @@ function mapEvent(f: EventForm, timeZone: string): EventSubmitPayload {
         window: "NONE",
         windowStart: null,
         windowEnd: null,
+        durationMinutes,
       };
     default:
       return base;
@@ -381,7 +397,12 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: Eve
   const isUrgRel = f.priority === "URGENTE" || f.priority === "RELEVANTE";
   const isOpcional = f.priority === "OPCIONAL";
   const isReminder = f.priority === "RECORDATORIO";
-  const canSubmit = f.title.trim().length > 0 && (!isCritica || (f.date && f.timeStart && f.timeEnd));
+  const parsedDuration = Number.parseFloat(f.durationHours ?? "");
+  const hasDuration = isUrgRel ? Number.isFinite(parsedDuration) && parsedDuration > 0 : true;
+  const canSubmit =
+    f.title.trim().length > 0 &&
+    (!isCritica || (f.date && f.timeStart && f.timeEnd)) &&
+    hasDuration;
 
   return (
     <div className="space-y-4">
@@ -407,7 +428,23 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: Eve
 
       <Row>
         <Field label="Prioridad" labelIcon={<Flag className="h-4 w-4" />}>
-          <Select value={f.priority} onChange={(e) => set({ ...f, priority: e.target.value as Priority })}>
+          <Select
+            value={f.priority}
+            onChange={(e) => {
+              const nextPriority = e.target.value as Priority;
+              const next: EventForm = {
+                ...f,
+                priority: nextPriority,
+                repeat:
+                  nextPriority === "URGENTE" || nextPriority === "RELEVANTE" ? "NONE" : f.repeat,
+              };
+              if (nextPriority === "URGENTE" || nextPriority === "RELEVANTE") {
+                const durationValue = Number.parseFloat(next.durationHours);
+                next.durationHours = Number.isFinite(durationValue) && durationValue > 0 ? next.durationHours : "1";
+              }
+              set(next);
+            }}
+          >
             <option value="CRITICA">Crítica</option>
             <option value="URGENTE">Urgente</option>
             <option value="RELEVANTE">Relevante</option>
@@ -460,42 +497,27 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: Eve
                 <option value="NONE">Sin preferencia</option>
               </Select>
             </Field>
-            {f.window === "RANGO" && (
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Inicio" labelIcon={<Calendar className="h-4 w-4" />}>
-                  <Input type="date" value={f.windowStart} onChange={(e) => set({ ...f, windowStart: e.target.value })} />
-                </Field>
-                <Field label="Fin" labelIcon={<Calendar className="h-4 w-4" />}>
-                  <Input type="date" value={f.windowEnd} onChange={(e) => set({ ...f, windowEnd: e.target.value })} />
-                </Field>
-              </div>
-            )}
-          </Row>
-          <Row>
-            <Field label="Fecha (opcional)" labelIcon={<Calendar className="h-4 w-4" />}>
-              <Input type="date" value={f.date} onChange={(e) => set({ ...f, date: e.target.value })} />
+            <Field label="Duración (horas)" labelIcon={<Clock className="h-4 w-4" />}>
+              <Input
+                type="number"
+                min="0.25"
+                step="0.25"
+                value={f.durationHours ?? ""}
+                onChange={(e) => set({ ...f, durationHours: e.target.value })}
+                placeholder="Ej. 1.5"
+              />
             </Field>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Hora inicio (opcional)" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
-              </Field>
-              <Field label="Hora fin (opcional)" labelIcon={<Clock className="h-4 w-4" />}>
-                <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
-              </Field>
-            </div>
           </Row>
-          <Row>
-            <Field label="Repetición" labelIcon={<RepeatIcon className="h-4 w-4" />}>
-              <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
-                <option value="NONE">No repetir</option>
-                <option value="DAILY">Diario</option>
-                <option value="WEEKLY">Semanal</option>
-                <option value="MONTHLY">Mensual</option>
-                <option value="YEARLY">Anual</option>
-              </Select>
-            </Field>
-            <div />
-          </Row>
+          {f.window === "RANGO" && (
+            <Row>
+              <Field label="Inicio" labelIcon={<Calendar className="h-4 w-4" />}>
+                <Input type="date" value={f.windowStart} onChange={(e) => set({ ...f, windowStart: e.target.value })} />
+              </Field>
+              <Field label="Fin" labelIcon={<Calendar className="h-4 w-4" />}>
+                <Input type="date" value={f.windowEnd} onChange={(e) => set({ ...f, windowEnd: e.target.value })} />
+              </Field>
+            </Row>
+          )}
         </>
       )}
 
