@@ -57,6 +57,7 @@ type EventRow = {
   window?: 'NONE' | 'PRONTO' | 'SEMANA' | 'MES' | 'RANGO' | null;
   windowStart?: string | null;
   windowEnd?: string | null;
+  durationMinutes?: number | null;
 };
 
 type ModalInitialEvent = {
@@ -70,6 +71,7 @@ type ModalInitialEvent = {
   date: string;
   timeStart: string;
   timeEnd: string;
+  durationHours: string;
 };
 
 type ModalInitialReminder = {
@@ -324,6 +326,13 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }
 
 function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | null {
+  const minutesToHourString = (minutes?: number | null) => {
+    if (!minutes || minutes <= 0) return '';
+    const hours = minutes / 60;
+    const rounded = Math.round(hours * 100) / 100;
+    return rounded.toString();
+  };
+
   // Si es TAREA
   if (row.kind === 'TAREA') {
     return null;
@@ -349,6 +358,11 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
   // Si es EVENTO
   const startDate = row.start ? isoToDate(row.start) : null;
   const endDate = row.end ? isoToDate(row.end) : null;
+  const directDuration = typeof row.durationMinutes === 'number' ? row.durationMinutes : null;
+  const inferredDuration = startDate && endDate && endDate > startDate
+    ? Math.round((endDate.getTime() - startDate.getTime()) / 60000)
+    : null;
+  const durationForForm = directDuration && directDuration > 0 ? directDuration : inferredDuration;
 
   // ✅ DEBUG
   console.debug('START en mapRowToEditInitial', debugDateFull(startDate, timeZone));
@@ -366,6 +380,7 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
     date: dateToDateStringLocal(startDate, timeZone),
     timeStart: dateToTimeStringLocal(startDate, timeZone),
     timeEnd: dateToTimeStringLocal(endDate, timeZone),
+    durationHours: minutesToHourString(durationForForm) || '1',
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======

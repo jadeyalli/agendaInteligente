@@ -16,6 +16,7 @@ export type EventRow = {
   end?: string | null;
   isAllDay?: boolean | null;
   dueDate?: string | null;
+  durationMinutes?: number | null;
 };
 
 const badgeByPriority: Record<NonNullable<EventRow['priority']>, string> = {

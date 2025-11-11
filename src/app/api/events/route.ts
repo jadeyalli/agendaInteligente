@@ -205,6 +205,7 @@ const PatchSchema = z.object({
   // evento
   start: z.union([z.coerce.date(), z.null()]).optional(),
   end: z.union([z.coerce.date(), z.null()]).optional(),
+  durationMinutes: z.union([z.number().int().positive(), z.null()]).optional(),
   isAllDay: z.boolean().optional(),
   isFixed: z.boolean().optional(),
 
@@ -282,6 +283,7 @@ export async function PATCH(req: Request) {
 
         start: data.hasOwnProperty('start') ? data.start : undefined,
         end: data.hasOwnProperty('end') ? data.end : undefined,
+        durationMinutes: data.hasOwnProperty('durationMinutes') ? data.durationMinutes : undefined,
         isAllDay: data.isAllDay,
 
         dueDate: data.hasOwnProperty('dueDate') ? data.dueDate : undefined,
@@ -925,6 +927,7 @@ const EventCreateSchema_EVENTO = z.object({
 
   start: zDate,  // requerido cuando repeat ≠ NONE
   end: zDate,
+  durationMinutes: z.number().int().positive().nullish(),
   isAllDay: z.boolean().optional(),
   tzid: z.string().trim().min(1).optional(),
 
@@ -1076,6 +1079,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
       windowStart: normalizedWindowStart,
       windowEnd: normalizedWindowEnd,
 
+      durationMinutes: data.durationMinutes ?? null,
+
       isFixed: data.isFixed ?? false,
       participatesInScheduling: data.participatesInScheduling ?? true,
       transparency: data.transparency ?? null,
@@ -1113,6 +1118,8 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
         window: data.window,
         windowStart: normalizedWindowStart,
         windowEnd: normalizedWindowEnd,
+
+        durationMinutes: data.durationMinutes ?? null,
 
         isFixed: data.isFixed ?? false,
         participatesInScheduling: data.participatesInScheduling ?? true,
