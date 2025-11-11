@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "db:prepare": "prisma migrate deploy || prisma db push",
+    "db:migrate": "prisma migrate deploy || prisma db push",
+    "db:prepare": "npm run db:migrate --silent && prisma generate",
     "predev": "npm run db:prepare",
     "prestart": "npm run db:prepare",
     "dev": "next dev",

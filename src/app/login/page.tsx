@@ -56,7 +56,8 @@ export default function LoginPage() {
       }
 
       setSuccess(typeof data?.message === 'string' ? data.message : 'Operación exitosa.');
-      router.push('/dashboard');
+      const destination = isRegister ? '/settings?first=1' : '/dashboard';
+      router.push(destination);
     } catch (submitError) {
       console.error(submitError);
       setError('No se pudo conectar con el servidor.');
