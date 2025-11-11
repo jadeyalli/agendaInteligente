@@ -101,8 +101,25 @@ function ensureDurationMs(start: Date, end: Date | null, isAllDay: boolean): num
     return HOUR_MS;
 }
 
-function dayWindowFor(date: Date): { windowStart: Date; windowEnd: Date } {
-    const windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+function isoDayFromJsDay(day: number): number {
+    return (day + 6) % 7;
+}
+
+function dayWindowFor(
+    date: Date,
+    enabledWeekdays?: Set<number>,
+): { windowStart: Date; windowEnd: Date } {
+    let windowStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+
+    if (!enabledWeekdays || enabledWeekdays.size === 0 || enabledWeekdays.size >= 7) {
+        const windowEnd = new Date(windowStart.getTime() + DAY_MS);
+        return { windowStart, windowEnd };
+    }
+
+    while (!enabledWeekdays.has(isoDayFromJsDay(windowStart.getDay()))) {
+        windowStart = new Date(windowStart.getTime() + DAY_MS);
+    }
+
     const windowEnd = new Date(windowStart.getTime() + DAY_MS);
     return { windowStart, windowEnd };
 }
@@ -356,7 +373,10 @@ export async function importIcsFromText(
             continue;
         }
 
-        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(start);
+        const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = dayWindowFor(
+            start,
+            prefs.enabledWeekdays,
+        );
 
         const smartBase = {
             userId: user.id,
@@ -419,7 +439,10 @@ export async function importIcsFromText(
         };
 
         if (occurrenceCount <= 1) {
-            const { windowStart, windowEnd } = dayWindowFor(occurrenceDates[0] ?? start);
+            const { windowStart, windowEnd } = dayWindowFor(
+                occurrenceDates[0] ?? start,
+                prefs.enabledWeekdays,
+            );
             if (whereByUid) {
                 const saved = await prisma.event.upsert({
                     where: whereByUid,
@@ -472,7 +495,7 @@ export async function importIcsFromText(
         let master: DbEvent | null = null;
         for (let index = 0; index < occurrenceCount; index += 1) {
             const occurrence = occurrenceDates[index] ?? addDays(start, index);
-            const { windowStart, windowEnd } = dayWindowFor(occurrence);
+            const { windowStart, windowEnd } = dayWindowFor(occurrence, prefs.enabledWeekdays);
             const data = {
                 ...baseEventData,
                 windowStart,
