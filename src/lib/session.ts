@@ -8,7 +8,7 @@ import type { User } from '@prisma/client';
  * Devuelve null si no existe sesión válida.
  */
 export async function getSessionUser(): Promise<User | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const session = cookieStore.get('sessionUser');
   if (!session?.value) {
     return null;
