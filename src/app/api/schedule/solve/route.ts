@@ -1,5 +1,4 @@
 // app/api/schedule/solve/route.ts
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
@@ -13,23 +12,39 @@ import {
   type DayCode,
   type UserSettingsValues,
 } from '@/lib/user-settings';
+import { dateToDateStringLocal, dateToTimeStringLocal } from '@/lib/timezone';
 import { Priority } from '@prisma/client';
 import { spawn } from 'child_process';
 
 export const runtime = 'nodejs';
 
-type SolvePayload = any;
+interface SolvePayload {
+  user: { id: string; timezone: string };
+  horizon: { start: string; end: string; slotMinutes: number };
+  availability: { preferred: { start: string; end: string }[]; fallbackUsed: boolean };
+  events: {
+    fixed: unknown[];
+    movable: unknown[];
+    new: unknown[];
+    newFixed: unknown[];
+  };
+  weights: Record<string, Record<string, number>>;
+  policy: Record<string, unknown>;
+}
 
 // ———————————— Utils de tiempo ————————————
 function endOfMonth(d = new Date()) {
   const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
   return end;
 }
-function pad2(n: number) { return String(n).padStart(2, '0'); }
-function toLocalISO(dt: Date) {
-  // ISO sin tz => el solver lo interpretará en America/Mexico_City
-  return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}T${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:00`;
+
+function toLocalISO(dt: Date, tz: string): string {
+  // Genera ISO naive que el solver interpretará en la timezone del usuario
+  const datePart = dateToDateStringLocal(dt, tz);  // "YYYY-MM-DD" en la tz del usuario
+  const timePart = dateToTimeStringLocal(dt, tz);  // "HH:MM" en la tz del usuario
+  return `${datePart}T${timePart}:00`;
 }
+
 function minutesBetween(a?: Date | null, b?: Date | null) {
   if (!a || !b) return null;
   return Math.max(1, Math.round((b.getTime() - a.getTime()) / 60000));
@@ -53,7 +68,7 @@ async function runSolver(input: SolvePayload) {
   const pythonBin = process.env.PYTHON_BIN || 'python'; // setea PYTHON_BIN si usas otro
   const script = process.cwd() + '/solver.py';
 
-  return new Promise<any>((resolve, reject) => {
+  return new Promise<unknown>((resolve, reject) => {
     const child = spawn(pythonBin, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
@@ -69,8 +84,9 @@ async function runSolver(input: SolvePayload) {
       try {
         const json = JSON.parse(out.trim());
         resolve(json);
-      } catch (e: any) {
-        reject(new Error('No se pudo parsear salida del solver: ' + e.message + '\n' + out));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        reject(new Error('No se pudo parsear salida del solver: ' + msg + '\n' + out));
       }
     });
 
@@ -89,6 +105,7 @@ function generatePreferredRanges(
   horizonStart: Date,
   horizonEnd: Date,
   settings: UserSettingsValues,
+  tz: string,
 ) {
   const ranges: { start: string; end: string }[] = [];
   const enabled = new Set<DayCode>(settings.enabledDays);
@@ -117,7 +134,7 @@ function generatePreferredRanges(
       const start = clampDate(dayStart, horizonStart, horizonEnd);
       const end = clampDate(dayEnd, horizonStart, horizonEnd);
       if (end.getTime() > start.getTime()) {
-        ranges.push({ start: toLocalISO(start), end: toLocalISO(end) });
+        ranges.push({ start: toLocalISO(start, tz), end: toLocalISO(end, tz) });
       }
     }
     cursor.setDate(cursor.getDate() + 1);
@@ -126,13 +143,14 @@ function generatePreferredRanges(
   return ranges;
 }
 
-async function buildPayloadForUser(userId: string, extraNew?: any[]) {
-  const tz = 'America/Mexico_City';
+async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
   const now = new Date();
   const horizonStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const horizonEnd = endOfMonth(now);
 
   const rawSettings = await prisma.userSettings.findUnique({ where: { userId } });
+  const tz = rawSettings?.timezone ?? 'America/Mexico_City';
+
   const settings = rawSettings
     ? mergeUserSettings({
         dayStart: rawSettings.dayStart,
@@ -149,8 +167,8 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
     orderBy: [{ start: 'asc' }, { createdAt: 'asc' }],
   });
 
-  const fixed: any[] = [];
-  const movable: any[] = [];
+  const fixed: unknown[] = [];
+  const movable: unknown[] = [];
 
   for (const r of events) {
     const prio = mapPriorityToEisen(r.priority);
@@ -161,8 +179,8 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
     if (prio === 'UI' && r.start && r.end) {
       fixed.push({
         id: r.id,
-        start: toLocalISO(new Date(r.start)),
-        end: toLocalISO(new Date(r.end)),
+        start: toLocalISO(new Date(r.start), tz),
+        end: toLocalISO(new Date(r.end), tz),
         isInPerson: r.isInPerson,
         canOverlap: r.canOverlap,
         blocksCapacity,
@@ -172,9 +190,8 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
 
     // UnI / InU
     if ((prio === 'UnI' || prio === 'InU')) {
-      // Si tiene start/end ya asignados → movable (el solver puede moverlos si conviene)
-      const currentStart = r.start ? toLocalISO(new Date(r.start)) : null;
-      const window = (r.window ?? defaultWindowFor(r.priority)) as any;
+      const currentStart = r.start ? toLocalISO(new Date(r.start), tz) : null;
+      const window = (r.window ?? defaultWindowFor(r.priority)) as 'PRONTO'|'SEMANA'|'MES'|'RANGO';
 
       movable.push({
         id: r.id,
@@ -184,13 +201,13 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
         canOverlap: r.canOverlap,
         currentStart,
         window,
-        windowStart: r.windowStart ? toLocalISO(new Date(r.windowStart)) : null,
-        windowEnd: r.windowEnd ? toLocalISO(new Date(r.windowEnd)) : null,
+        windowStart: r.windowStart ? toLocalISO(new Date(r.windowStart), tz) : null,
+        windowEnd: r.windowEnd ? toLocalISO(new Date(r.windowEnd), tz) : null,
       });
     }
   }
 
-  const preferredRanges = generatePreferredRanges(horizonStart, horizonEnd, settings);
+  const preferredRanges = generatePreferredRanges(horizonStart, horizonEnd, settings, tz);
   const activeDays = Array.from(new Set(dayCodesToWeekdayIndexes(settings.enabledDays))).sort(
     (a, b) => a - b,
   );
@@ -198,8 +215,8 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
   const payload: SolvePayload = {
     user: { id: userId, timezone: tz },
     horizon: {
-      start: toLocalISO(horizonStart),
-      end: toLocalISO(horizonEnd),
+      start: toLocalISO(horizonStart, tz),
+      end: toLocalISO(horizonEnd, tz),
       slotMinutes: 30,
     },
     availability: {
@@ -236,7 +253,7 @@ async function buildPayloadForUser(userId: string, extraNew?: any[]) {
 // ———————————— RUTA: POST /api/schedule/solve ————————————
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({} as Record<string, unknown>));
     // body puede traer: { new: [ {id, priority: "UnI"|"InU", durationMin, isInPerson, canOverlap, window, windowStart, windowEnd} ] }
     // Si no trae "new", solo re-optimiza lo existente.
     const user = await getSessionUser();
@@ -249,9 +266,9 @@ export async function POST(req: Request) {
     const result = await runSolver(payload);
 
     return NextResponse.json(result);
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Server error';
     console.error('POST /api/schedule/solve error', e);
-    return NextResponse.json({ error: e.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
-
