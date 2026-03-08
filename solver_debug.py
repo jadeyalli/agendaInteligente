@@ -124,6 +124,20 @@ def build_debug_info(payload: Dict[str, Any],
                 preferred_slots.update(horizon.slots_in_interval(a, b))
             cur = (cur + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # working_hours_slots: siempre calculado (nivel 2 de fallback de preferencia)
+    working_hours_slots: Set[int] = set()
+    cur = horizon.start_dt
+    while cur < horizon.end_dt:
+        dow = cur.weekday()
+        if dow in allowed_days:
+            a = cur.replace(hour=day_start_tuple[0], minute=day_start_tuple[1], second=0, microsecond=0)
+            b = cur.replace(hour=day_end_tuple[0], minute=day_end_tuple[1], second=0, microsecond=0)
+            if b <= a:
+                a = cur.replace(hour=0, minute=0, second=0, microsecond=0)
+                b = (a + timedelta(days=1))
+            working_hours_slots.update(horizon.slots_in_interval(a, b))
+        cur = (cur + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
     # Fixed events (igual que en el solver)
     fixed_json = payload["events"].get("fixed", []) + payload["events"].get("newFixed", [])
     fixed: List[FixedEvent] = []
@@ -198,26 +212,24 @@ def build_debug_info(payload: Dict[str, Any],
 
     # Helpers internos
 
-    def filter_to_preferred_if_possible(
-        starts: List[int], dur: int, require: bool = False
-    ) -> List[int]:
-        if not preferred_slots:
-            return starts
+    def filter_to_preferred_if_possible(starts: List[int], dur: int, require: bool = False) -> List[int]:
+        def fits_set(s: int, slot_set: Set[int]) -> bool:
+            return all(t in slot_set for t in range(s, s + dur))
 
-        preferred_starts: List[int] = []
-        for s in starts:
-            ok = True
-            for t in range(s, s + dur):
-                if t not in preferred_slots:
-                    ok = False
-                    break
-            if ok:
-                preferred_starts.append(s)
+        # Nivel 1: slots preferidos del usuario
+        if preferred_slots:
+            pref = [s for s in starts if fits_set(s, preferred_slots)]
+            if pref:
+                return pref
 
-        if preferred_starts:
-            return preferred_starts
+        # Nivel 2: horario laboral (fallback intermedio)
+        if working_hours_slots:
+            work = [s for s in starts if fits_set(s, working_hours_slots)]
+            if work:
+                return work
 
-        return preferred_starts if require else starts
+        # Nivel 3: cualquier slot
+        return starts
 
     def filter_allowed_days(starts: List[int], dur: int) -> List[int]:
         if len(allowed_days) >= 7:
@@ -249,21 +261,14 @@ def build_debug_info(payload: Dict[str, Any],
 
         starts = base_range
 
-        require_preferred = e.priority in ("UnI", "InU")
-        starts = filter_to_preferred_if_possible(starts, e.duration_slots, require=require_preferred)
-
-        # si no puede solaparse, remover choque con fijos
+        # Primero remover conflictos (dominio factible real), luego aplicar preferencia.
         if not e.overlap and fixed_blocking:
             starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking, buffer_for_event)
 
-        # restringir a preferidos si hay opción
-        if not require_preferred:
-            starts = filter_to_preferred_if_possible(starts, e.duration_slots)
+        # Preferencia con fallback de 3 niveles: preferidos → horario laboral → cualquier slot.
+        starts = filter_to_preferred_if_possible(starts, e.duration_slots)
 
-        starts.sort()
-        starts = reduce_candidates(e.priority, starts, k=300)
-
-        # costos
+        # Calcular costos para TODOS los candidatos antes de truncar (mirrors solver.py)
         for s in starts:
             dist_cost = max(0, s - now_slot) * int(dist_w[e.priority])
             offpref_slots = count_offpref_slots(s, e.duration_slots, preferred_slots)
@@ -280,6 +285,10 @@ def build_debug_info(payload: Dict[str, Any],
                 crossday=cross_cost,
                 movecost=move_cost
             )
+
+        # Ordenar por costo y conservar los 300 mejores candidatos
+        starts.sort(key=lambda s: (costs[(e.id, s)].total, s))
+        starts = starts[:300]
 
         candidates[e.id] = starts
 

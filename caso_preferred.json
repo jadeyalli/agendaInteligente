@@ -1,0 +1,80 @@
+{
+  "user": { "id": "u_preferred", "timezone": "America/Mexico_City" },
+  "horizon": {
+    "start": "2026-03-09T00:00:00",
+    "end": "2026-03-09T23:59:59",
+    "slotMinutes": 30
+  },
+  "availability": {
+    "preferred": [
+      { "start": "2026-03-09T09:00:00", "end": "2026-03-09T13:00:00" }
+    ],
+    "fallbackUsed": false
+  },
+  "events": {
+    "fixed": [
+      {
+        "id": "bloqueo_manana_1",
+        "start": "2026-03-09T09:00:00",
+        "end": "2026-03-09T10:00:00",
+        "isInPerson": true,
+        "canOverlap": false,
+        "blocksCapacity": true
+      },
+      {
+        "id": "bloqueo_manana_2",
+        "start": "2026-03-09T10:00:00",
+        "end": "2026-03-09T11:00:00",
+        "isInPerson": true,
+        "canOverlap": false,
+        "blocksCapacity": true
+      },
+      {
+        "id": "bloqueo_manana_3",
+        "start": "2026-03-09T11:00:00",
+        "end": "2026-03-09T12:30:00",
+        "isInPerson": true,
+        "canOverlap": false,
+        "blocksCapacity": true
+      },
+      {
+        "id": "bloqueo_manana_4",
+        "start": "2026-03-09T12:30:00",
+        "end": "2026-03-09T13:00:00",
+        "isInPerson": true,
+        "canOverlap": false,
+        "blocksCapacity": true
+      }
+    ],
+    "movable": [],
+    "new": [
+      {
+        "id": "urgente_sin_horario_preferido",
+        "priority": "UnI",
+        "durationMin": 60,
+        "isInPerson": true,
+        "canOverlap": false,
+        "window": "PRONTO",
+        "windowStart": null,
+        "windowEnd": null
+      }
+    ],
+    "newFixed": []
+  },
+  "weights": {
+    "move": { "UnI": 20, "InU": 10 },
+    "distancePerSlot": { "UnI": 4, "InU": 1 },
+    "offPreferencePerSlot": { "UnI": 1, "InU": 3 },
+    "crossDayPerEvent": { "UnI": 2, "InU": 1 }
+  },
+  "policy": {
+    "allowWeekend": false,
+    "noOverlapCapacity": 1,
+    "remoteCapacity": 9999,
+    "dayStart": "09:00",
+    "dayEnd": "18:00",
+    "activeDays": [0, 1, 2, 3, 4],
+    "eventBufferMinutes": 0,
+    "schedulingLeadMinutes": 0
+  }
+}
