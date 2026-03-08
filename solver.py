@@ -137,6 +137,21 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
                 preferred_slots.update(horizon.slots_in_interval(a, b))
             cur = (cur + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # working_hours_slots: siempre calculado desde dayStart/dayEnd/activeDays.
+    # Sirve como nivel intermedio de fallback cuando los slots preferidos están bloqueados.
+    working_hours_slots: Set[int] = set()
+    cur = horizon.start_dt
+    while cur < horizon.end_dt:
+        dow = cur.weekday()
+        if dow in allowed_days:
+            a = cur.replace(hour=day_start_tuple[0], minute=day_start_tuple[1], second=0, microsecond=0)
+            b = cur.replace(hour=day_end_tuple[0], minute=day_end_tuple[1], second=0, microsecond=0)
+            if b <= a:
+                a = cur.replace(hour=0, minute=0, second=0, microsecond=0)
+                b = (a + timedelta(days=1))
+            working_hours_slots.update(horizon.slots_in_interval(a, b))
+        cur = (cur + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
     # Fixed events
     fixed_json = payload["events"].get("fixed", []) + payload["events"].get("newFixed", [])
     fixed: List[FixedEvent] = []
@@ -232,27 +247,29 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
     # starts fijos que bloquean para filtrado
     fixed_blocking = [f for f in fixed if f.blocks_capacity]
 
-    # Helper: filtrar completamente a "slots preferidos" si hay al menos 1 opción factible allí.
-    def filter_to_preferred_if_possible(
-        starts: List[int], dur: int, require: bool = False
-    ) -> List[int]:
-        if not preferred_slots:
-            return starts
+    # Helper: filtrar candidatos usando 3 niveles de fallback:
+    #   Nivel 1 — slots dentro de preferencia del usuario (horario ideal)
+    #   Nivel 2 — slots dentro de horario laboral (dayStart-dayEnd)
+    #   Nivel 3 — cualquier slot disponible (sin restricción de horario)
+    # Esto garantiza que eventos SIEMPRE tengan candidatos mientras haya slots libres.
+    def filter_to_preferred_if_possible(starts: List[int], dur: int, require: bool = False) -> List[int]:
+        def fits_set(s: int, slot_set: Set[int]) -> bool:
+            return all(t in slot_set for t in range(s, s + dur))
 
-        preferred_starts: List[int] = []
-        for s in starts:
-            ok = True
-            for t in range(s, s + dur):
-                if t not in preferred_slots:
-                    ok = False
-                    break
-            if ok:
-                preferred_starts.append(s)
+        # Nivel 1: slots preferidos del usuario
+        if preferred_slots:
+            pref = [s for s in starts if fits_set(s, preferred_slots)]
+            if pref:
+                return pref
 
-        if preferred_starts:
-            return preferred_starts
+        # Nivel 2: horario laboral (fallback intermedio)
+        if working_hours_slots:
+            work = [s for s in starts if fits_set(s, working_hours_slots)]
+            if work:
+                return work
 
-        return preferred_starts if require else starts
+        # Nivel 3: cualquier slot (no filtrar)
+        return starts
 
     # Helper: filtrar días deshabilitados — verifica TODOS los días que ocupa el evento
     def filter_allowed_days(starts: List[int], dur: int) -> List[int]:
@@ -295,22 +312,20 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         starts = base_range
 
-        require_preferred = e.priority in ("UnI", "InU")
-        starts = filter_to_preferred_if_possible(starts, e.duration_slots, require=require_preferred)
-
-        # si no puede solaparse, remover choque con fijos
+        # Primero remover conflictos con fijos (el dominio real factible).
+        # Luego filtrar por preferencia sobre los candidatos ya factibles.
+        # Este orden es crítico: si se aplica el filtro de preferencia antes,
+        # se puede acabar con un subconjunto de slots que después quedan todos
+        # bloqueados por eventos fijos, resultando en dominio vacío.
         if not e.overlap and fixed_blocking:
             starts = remove_conflicting_starts(starts, e.duration_slots, fixed_blocking, buffer_for_event)
 
-        # respetar disponibilidad: intentar restringir SOLO a preferidos si hay opción
-        if not require_preferred:
-            starts = filter_to_preferred_if_possible(starts, e.duration_slots)
+        # Preferencia con fallback de 3 niveles: preferidos → horario laboral → cualquier slot.
+        starts = filter_to_preferred_if_possible(starts, e.duration_slots)
 
-        # Orden simple por inicio
-        starts.sort()
-        starts = reduce_candidates(e.priority, starts, k=300)
-
-        # Precalcular costos (el costo de "offpref" sigue presente, por si no hubo opción preferida)
+        # Calcular costos para TODOS los candidatos antes de truncar.
+        # Así la reducción a k=300 preserva los candidatos de MENOR COSTO,
+        # no solo los temporalmente más cercanos.
         for s in starts:
             dist_cost = max(0, s - now_slot) * int(dist_w[e.priority])
             offpref_slots = count_offpref_slots(s, e.duration_slots, preferred_slots)
@@ -327,6 +342,10 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
                 crossday=cross_cost,
                 movecost=move_cost
             )
+
+        # Ordenar por costo ascendente y conservar los k mejores candidatos.
+        starts.sort(key=lambda s: (costs[(e.id, s)].total, s))
+        starts = starts[:300]
 
         candidates[e.id] = starts
 
@@ -381,9 +400,12 @@ def solve_schedule(payload: Dict[str, Any]) -> Dict[str, Any]:
                 obj_terms.append(c * x_vars[(ev.id, s)])
     model.Minimize(sum(obj_terms) if obj_terms else 0)
 
-    # Resolver
+    # Resolver — timeout adaptativo según tamaño del problema
+    num_vars = sum(len(candidates[ev.id]) for ev in flex)
+    time_limit = min(30.0, 5.0 + 0.2 * len(flex) + 0.001 * num_vars)
+
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 5.0
+    solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.num_search_workers = 8
 
     status = solver.Solve(model)
