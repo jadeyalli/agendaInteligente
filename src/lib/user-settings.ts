@@ -37,6 +37,17 @@ export const DAY_CODE_TO_WEEKDAY_INDEX: Record<DayCode, number> = {
   sun: 6,
 };
 
+// JS day convention: 0=Sun, 1=Mon, ..., 6=Sat (matches AvailabilitySlot.dayOfWeek)
+export const DAY_CODE_TO_JS_DAY: Record<DayCode, number> = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+};
+
 export const DEFAULT_USER_SETTINGS: UserSettingsValues = {
   dayStart: '09:00',
   dayEnd: '18:00',
@@ -155,7 +166,7 @@ export function mergeUserSettings(partial?: MergeInput | null): UserSettingsValu
       partial.eventBufferMinutes,
       DEFAULT_USER_SETTINGS.eventBufferMinutes,
     ),
-    schedulingLeadMinutes: sanitizePositiveInteger(
+    schedulingLeadMinutes: sanitizeBufferMinutes(
       partial.schedulingLeadMinutes,
       DEFAULT_USER_SETTINGS.schedulingLeadMinutes,
     ),
@@ -227,6 +238,44 @@ export function levelsToWeights(
     offPreferencePerSlot: WEIGHT_WORKHOURS_MAP[settings.weightWorkHours],
     crossDayPerEvent: WEIGHT_CROSSDAY_MAP[settings.weightCrossDay],
   };
+}
+
+// ———————————— Availability slots per day ————————————
+
+export type AvailabilitySlotInput = {
+  dayOfWeek: number;   // JS convention: 0=Sun ... 6=Sat
+  startTime: string;   // "HH:mm"
+  endTime: string;     // "HH:mm"
+};
+
+export function sanitizeAvailabilitySlots(
+  slots: unknown,
+  enabledDays: DayCode[],
+): AvailabilitySlotInput[] {
+  if (!Array.isArray(slots)) return [];
+
+  const enabledJsDays = new Set(enabledDays.map((code) => DAY_CODE_TO_JS_DAY[code]));
+  const seen = new Set<number>();
+  const result: AvailabilitySlotInput[] = [];
+
+  for (const slot of slots) {
+    if (!slot || typeof slot !== 'object') continue;
+    const s = slot as Record<string, unknown>;
+
+    const dayOfWeek = typeof s.dayOfWeek === 'number' ? s.dayOfWeek : NaN;
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) continue;
+    if (!enabledJsDays.has(dayOfWeek)) continue;
+    if (seen.has(dayOfWeek)) continue;
+
+    const startTime = sanitizeTimeString(s.startTime, '');
+    const endTime = sanitizeTimeString(s.endTime, '');
+    if (!startTime || !endTime || endTime <= startTime) continue;
+
+    seen.add(dayOfWeek);
+    result.push({ dayOfWeek, startTime, endTime });
+  }
+
+  return result;
 }
 
 // ———————————— Timezone groups for UI ————————————

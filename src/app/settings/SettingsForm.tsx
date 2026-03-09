@@ -4,22 +4,37 @@ import { useMemo, useState, type FormEvent } from 'react';
 
 import {
   DAY_CODES,
+  DAY_CODE_TO_JS_DAY,
   DAY_LABELS,
   DEFAULT_USER_SETTINGS,
   TIMEZONE_GROUPS,
+  type AvailabilitySlotInput,
   type DayCode,
   type UserSettingsValues,
 } from '@/lib/user-settings';
 
+type SlotMap = Map<number, { startTime: string; endTime: string }>;
+
+function slotsArrayToMap(slots: AvailabilitySlotInput[]): SlotMap {
+  const map: SlotMap = new Map();
+  for (const s of slots) {
+    map.set(s.dayOfWeek, { startTime: s.startTime, endTime: s.endTime });
+  }
+  return map;
+}
+
+function slotsMapToArray(map: SlotMap): AvailabilitySlotInput[] {
+  return Array.from(map.entries()).map(([dayOfWeek, { startTime, endTime }]) => ({
+    dayOfWeek,
+    startTime,
+    endTime,
+  }));
+}
+
 type SettingsFormProps = {
   initialValues: UserSettingsValues;
+  initialSlots: AvailabilitySlotInput[];
 };
-
-function clampMinutes(value: string, fallback: number) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(0, Math.round(num));
-}
 
 function clampBufferMinutes(value: string, fallback: number): number {
   const num = Number(value);
@@ -29,8 +44,9 @@ function clampBufferMinutes(value: string, fallback: number): number {
   return Math.round(rounded / 5) * 5;
 }
 
-export default function SettingsForm({ initialValues }: SettingsFormProps) {
+export default function SettingsForm({ initialValues, initialSlots }: SettingsFormProps) {
   const [form, setForm] = useState<UserSettingsValues>(initialValues);
+  const [slots, setSlots] = useState<SlotMap>(() => slotsArrayToMap(initialSlots));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +71,13 @@ export default function SettingsForm({ initialValues }: SettingsFormProps) {
           return prev; // al menos un día debe quedar habilitado
         }
         current.delete(code);
+        // Remove custom slot for disabled day
+        const jsDay = DAY_CODE_TO_JS_DAY[code];
+        setSlots((prev) => {
+          const next = new Map(prev);
+          next.delete(jsDay);
+          return next;
+        });
       } else {
         current.add(code);
       }
@@ -72,7 +95,7 @@ export default function SettingsForm({ initialValues }: SettingsFormProps) {
       const res = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, availabilitySlots: slotsMapToArray(slots) }),
       });
       if (res.status === 401) {
         window.location.href = '/login';
@@ -82,8 +105,12 @@ export default function SettingsForm({ initialValues }: SettingsFormProps) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo guardar');
       }
-      const data = (await res.json()) as UserSettingsValues;
-      setForm(data);
+      const data = (await res.json()) as UserSettingsValues & { availabilitySlots?: AvailabilitySlotInput[] };
+      const { availabilitySlots: returnedSlots, ...settingsData } = data;
+      setForm(settingsData);
+      if (returnedSlots) {
+        setSlots(slotsArrayToMap(returnedSlots));
+      }
       setMessage('Preferencias guardadas correctamente.');
       setSavedOnce(true);
       setReoptStatus('idle');
@@ -177,23 +204,99 @@ export default function SettingsForm({ initialValues }: SettingsFormProps) {
           <h2 className="text-lg font-semibold text-[var(--fg)]">Días habilitados</h2>
           <p className="text-sm text-[var(--muted)]">
             Selecciona los días que se considerarán para agendar automáticamente.
+            Puedes personalizar el horario preferido para cada día.
           </p>
         </header>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {DAY_CODES.map((code) => (
-            <label
-              key={code}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2 text-sm font-medium text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300"
-            >
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-indigo-500 focus:ring-indigo-400"
-                checked={enabledSet.has(code)}
-                onChange={() => toggleDay(code)}
-              />
-              <span>{DAY_LABELS[code]}</span>
-            </label>
-          ))}
+        <div className="grid gap-2">
+          {DAY_CODES.map((code) => {
+            const jsDay = DAY_CODE_TO_JS_DAY[code];
+            const isEnabled = enabledSet.has(code);
+            const customSlot = slots.get(jsDay);
+            const hasCustom = !!customSlot;
+
+            return (
+              <div
+                key={code}
+                className="rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2 shadow-sm transition hover:border-slate-300"
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-500 focus:ring-indigo-400"
+                    checked={isEnabled}
+                    onChange={() => toggleDay(code)}
+                  />
+                  <span className="text-sm font-medium text-[var(--fg)]">{DAY_LABELS[code]}</span>
+                  {isEnabled && (
+                    <button
+                      type="button"
+                      className={`ml-auto text-xs transition ${
+                        hasCustom
+                          ? 'font-medium text-indigo-600 hover:text-indigo-700'
+                          : 'text-[var(--muted)] hover:text-[var(--fg)]'
+                      }`}
+                      onClick={() => {
+                        setSlots((prev) => {
+                          const next = new Map(prev);
+                          if (next.has(jsDay)) {
+                            next.delete(jsDay);
+                          } else {
+                            next.set(jsDay, { startTime: form.dayStart, endTime: form.dayEnd });
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      {hasCustom ? 'Quitar horario personalizado' : 'Personalizar horario'}
+                    </button>
+                  )}
+                </div>
+                {isEnabled && hasCustom && (
+                  <div className="mt-2 flex items-center gap-2 pl-7">
+                    <input
+                      type="time"
+                      value={customSlot.startTime}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        setSlots((prev) => {
+                          const next = new Map(prev);
+                          const current = next.get(jsDay)!;
+                          next.set(jsDay, { ...current, startTime: val });
+                          return next;
+                        });
+                      }}
+                      className="rounded-lg border border-slate-200/70 bg-white/80 px-2 py-1 text-xs text-[var(--fg)] shadow-inner focus:border-indigo-400 focus:outline-none"
+                    />
+                    <span className="text-xs text-[var(--muted)]">a</span>
+                    <input
+                      type="time"
+                      value={customSlot.endTime}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        setSlots((prev) => {
+                          const next = new Map(prev);
+                          const current = next.get(jsDay)!;
+                          next.set(jsDay, { ...current, endTime: val });
+                          return next;
+                        });
+                      }}
+                      className="rounded-lg border border-slate-200/70 bg-white/80 px-2 py-1 text-xs text-[var(--fg)] shadow-inner focus:border-indigo-400 focus:outline-none"
+                    />
+                    {customSlot.endTime <= customSlot.startTime && (
+                      <span className="text-xs text-rose-600">Fin debe ser posterior a inicio</span>
+                    )}
+                  </div>
+                )}
+                {isEnabled && !hasCustom && (
+                  <p className="mt-1 pl-7 text-xs text-[var(--muted)]">
+                    Horario global: {form.dayStart} - {form.dayEnd}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -253,15 +356,17 @@ export default function SettingsForm({ initialValues }: SettingsFormProps) {
             <input
               type="number"
               min={0}
+              step={5}
               value={form.schedulingLeadMinutes}
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  schedulingLeadMinutes: clampMinutes(e.target.value, prev.schedulingLeadMinutes),
+                  schedulingLeadMinutes: clampBufferMinutes(e.target.value, prev.schedulingLeadMinutes),
                 }))
               }
               className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-[var(--fg)] shadow-inner focus:border-indigo-400 focus:outline-none"
             />
+            <span className="text-xs text-[var(--muted)]">Debe ser 0 o múltiplo de 5</span>
           </label>
         </div>
       </section>
@@ -477,6 +582,7 @@ export default function SettingsForm({ initialValues }: SettingsFormProps) {
               ...DEFAULT_USER_SETTINGS,
               enabledDays: [...DEFAULT_USER_SETTINGS.enabledDays],
             });
+            setSlots(new Map());
           }}
         >
           Restaurar valores por defecto

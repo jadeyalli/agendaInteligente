@@ -9,6 +9,13 @@ import type { Event, Priority, Prisma } from '@prisma/client';
 
 const DEFAULT_DURATION_MINUTES = 60;
 
+export type DayTimeSlot = {
+  startHour: number;
+  startMinute: number;
+  endHour: number;
+  endMinute: number;
+};
+
 export type SchedulingPreferences = {
   startHour: number;
   startMinute: number;
@@ -17,6 +24,7 @@ export type SchedulingPreferences = {
   bufferMinutes: number;
   leadMinutes: number;
   enabledWeekdays: Set<number>;
+  perDaySlots: Map<number, DayTimeSlot>; // keyed by ISO weekday index (0=Mon ... 6=Sun)
 };
 
 export type SchedulingContext = SchedulingPreferences & { earliestStart: Date };
@@ -24,8 +32,27 @@ export type SchedulingContext = SchedulingPreferences & { earliestStart: Date };
 type BusyInterval = { start: Date; end: Date };
 type WeightedBusyInterval = BusyInterval & { weight: number };
 
+function isoDayFromJsDay(day: number): number {
+  return (day + 6) % 7;
+}
+
+function getDayTimes(date: Date, context: SchedulingContext): DayTimeSlot {
+  const isoIndex = isoDayFromJsDay(date.getDay());
+  const custom = context.perDaySlots.get(isoIndex);
+  if (custom) return custom;
+  return {
+    startHour: context.startHour,
+    startMinute: context.startMinute,
+    endHour: context.endHour,
+    endMinute: context.endMinute,
+  };
+}
+
 export async function loadSchedulingPreferences(userId: string): Promise<SchedulingPreferences> {
-  const record = await prisma.userSettings.findUnique({ where: { userId } });
+  const [record, slotRecords] = await Promise.all([
+    prisma.userSettings.findUnique({ where: { userId } }),
+    prisma.availabilitySlot.findMany({ where: { userId } }),
+  ]);
   const settings = record
     ? mergeUserSettings({
         dayStart: record.dayStart,
@@ -51,6 +78,20 @@ export async function loadSchedulingPreferences(userId: string): Promise<Schedul
     }
   }
 
+  // Build per-day slots map keyed by ISO weekday index
+  const perDaySlots = new Map<number, DayTimeSlot>();
+  for (const slot of slotRecords) {
+    const isoIndex = isoDayFromJsDay(slot.dayOfWeek);
+    const start = timeStringToParts(slot.startTime);
+    const end = timeStringToParts(slot.endTime);
+    perDaySlots.set(isoIndex, {
+      startHour: start.hour,
+      startMinute: start.minute,
+      endHour: end.hour,
+      endMinute: end.minute,
+    });
+  }
+
   return {
     startHour,
     startMinute,
@@ -59,6 +100,7 @@ export async function loadSchedulingPreferences(userId: string): Promise<Schedul
     bufferMinutes: settings.eventBufferMinutes,
     leadMinutes: settings.schedulingLeadMinutes,
     enabledWeekdays,
+    perDaySlots,
   };
 }
 
@@ -67,34 +109,32 @@ export function buildSchedulingContext(prefs: SchedulingPreferences): Scheduling
   return { ...prefs, earliestStart };
 }
 
-function isoDayFromJsDay(day: number): number {
-  return (day + 6) % 7;
-}
-
 function isEnabledDay(date: Date, context: SchedulingContext): boolean {
   const isoIndex = isoDayFromJsDay(date.getDay());
   return context.enabledWeekdays.has(isoIndex);
 }
 
 function startOfWorkingDay(date: Date, context: SchedulingContext): Date {
+  const times = getDayTimes(date, context);
   return new Date(
     date.getFullYear(),
     date.getMonth(),
     date.getDate(),
-    context.startHour,
-    context.startMinute,
+    times.startHour,
+    times.startMinute,
     0,
     0,
   );
 }
 
 function endOfWorkingDay(date: Date, context: SchedulingContext): Date {
+  const times = getDayTimes(date, context);
   const end = new Date(
     date.getFullYear(),
     date.getMonth(),
     date.getDate(),
-    context.endHour,
-    context.endMinute,
+    times.endHour,
+    times.endMinute,
     0,
     0,
   );
@@ -114,11 +154,13 @@ function ensureEarliest(date: Date, context: SchedulingContext): Date {
 
 function moveToNextWorkingDay(date: Date, context: SchedulingContext): Date {
   const next = new Date(date);
-  next.setHours(context.startHour, context.startMinute, 0, 0);
+  next.setHours(0, 0, 0, 0);
   do {
     next.setDate(next.getDate() + 1);
   } while (!isEnabledDay(next, context));
-  return ensureEarliest(next, context);
+  // Use day-aware start time
+  const dayStart = startOfWorkingDay(next, context);
+  return ensureEarliest(dayStart, context);
 }
 
 function clampToWorkingHours(date: Date, context: SchedulingContext): Date {

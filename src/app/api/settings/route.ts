@@ -8,11 +8,13 @@ import {
   parseEnabledDaysField,
   sanitizeBufferMinutes,
   sanitizeDayCodes,
-  sanitizePositiveInteger,
+
   sanitizeTimeString,
   sanitizeTimezone,
   sanitizeWeightLevel,
   serializeEnabledDays,
+  sanitizeAvailabilitySlots,
+  type AvailabilitySlotInput,
   type DayCode,
   type UserSettingsValues,
 } from '@/lib/user-settings';
@@ -41,7 +43,7 @@ function formatSettings(record?: {
       record.eventBufferMinutes,
       DEFAULT_USER_SETTINGS.eventBufferMinutes,
     ),
-    schedulingLeadMinutes: sanitizePositiveInteger(
+    schedulingLeadMinutes: sanitizeBufferMinutes(
       record.schedulingLeadMinutes,
       DEFAULT_USER_SETTINGS.schedulingLeadMinutes,
     ),
@@ -59,9 +61,17 @@ export async function GET() {
     return NextResponse.json({ error: 'No autenticado.' }, { status: 401 });
   }
 
-  const record = await prisma.userSettings.findUnique({ where: { userId: user.id } });
+  const [record, slots] = await Promise.all([
+    prisma.userSettings.findUnique({ where: { userId: user.id } }),
+    prisma.availabilitySlot.findMany({ where: { userId: user.id } }),
+  ]);
   const settings = formatSettings(record ?? undefined);
-  return NextResponse.json(settings);
+  const availabilitySlots: AvailabilitySlotInput[] = slots.map((s) => ({
+    dayOfWeek: s.dayOfWeek,
+    startTime: s.startTime,
+    endTime: s.endTime,
+  }));
+  return NextResponse.json({ ...settings, availabilitySlots });
 }
 
 type IncomingSettings = {
@@ -75,6 +85,7 @@ type IncomingSettings = {
   weightUrgency?: number;
   weightWorkHours?: number;
   weightCrossDay?: number;
+  availabilitySlots?: AvailabilitySlotInput[];
 };
 
 export async function PATCH(req: Request) {
@@ -104,7 +115,7 @@ export async function PATCH(req: Request) {
       : base.eventBufferMinutes;
   const schedulingLeadMinutes =
     body.schedulingLeadMinutes !== undefined
-      ? sanitizePositiveInteger(body.schedulingLeadMinutes, base.schedulingLeadMinutes)
+      ? sanitizeBufferMinutes(body.schedulingLeadMinutes, base.schedulingLeadMinutes)
       : base.schedulingLeadMinutes;
   const timezone =
     body.timezone !== undefined
@@ -140,24 +151,61 @@ export async function PATCH(req: Request) {
     weightCrossDay,
   };
 
-  const record = await prisma.userSettings.upsert({
-    where: { userId: user.id },
-    update: updatePayload,
-    create: { userId: user.id, ...updatePayload },
-  });
+  // Build availability slots if provided
+  const sanitizedSlots = body.availabilitySlots !== undefined
+    ? sanitizeAvailabilitySlots(body.availabilitySlots, enabledDays)
+    : null;
+
+  const operations: unknown[] = [
+    prisma.userSettings.upsert({
+      where: { userId: user.id },
+      update: updatePayload,
+      create: { userId: user.id, ...updatePayload },
+    }),
+  ];
+
+  if (sanitizedSlots !== null) {
+    operations.unshift(prisma.availabilitySlot.deleteMany({ where: { userId: user.id } }));
+    if (sanitizedSlots.length > 0) {
+      operations.push(
+        prisma.availabilitySlot.createMany({
+          data: sanitizedSlots.map((s) => ({
+            userId: user.id,
+            dayOfWeek: s.dayOfWeek,
+            startTime: s.startTime,
+            endTime: s.endTime,
+          })),
+        }),
+      );
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await prisma.$transaction(operations as any);
+
+  const [record, savedSlots] = await Promise.all([
+    prisma.userSettings.findUnique({ where: { userId: user.id } }),
+    prisma.availabilitySlot.findMany({ where: { userId: user.id } }),
+  ]);
 
   const merged = mergeUserSettings({
-    dayStart: record.dayStart,
-    dayEnd: record.dayEnd,
-    enabledDays: parseEnabledDaysField(record.enabledDays),
-    eventBufferMinutes: record.eventBufferMinutes,
-    schedulingLeadMinutes: record.schedulingLeadMinutes,
-    timezone: record.timezone,
-    weightStability: record.weightStability,
-    weightUrgency: record.weightUrgency,
-    weightWorkHours: record.weightWorkHours,
-    weightCrossDay: record.weightCrossDay,
+    dayStart: record!.dayStart,
+    dayEnd: record!.dayEnd,
+    enabledDays: parseEnabledDaysField(record!.enabledDays),
+    eventBufferMinutes: record!.eventBufferMinutes,
+    schedulingLeadMinutes: record!.schedulingLeadMinutes,
+    timezone: record!.timezone,
+    weightStability: record!.weightStability,
+    weightUrgency: record!.weightUrgency,
+    weightWorkHours: record!.weightWorkHours,
+    weightCrossDay: record!.weightCrossDay,
   });
 
-  return NextResponse.json(merged);
+  const availabilitySlots: AvailabilitySlotInput[] = savedSlots.map((s) => ({
+    dayOfWeek: s.dayOfWeek,
+    startTime: s.startTime,
+    endTime: s.endTime,
+  }));
+
+  return NextResponse.json({ ...merged, availabilitySlots });
 }
