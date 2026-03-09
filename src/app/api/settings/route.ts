@@ -6,9 +6,12 @@ import {
   DEFAULT_USER_SETTINGS,
   mergeUserSettings,
   parseEnabledDaysField,
+  sanitizeBufferMinutes,
   sanitizeDayCodes,
   sanitizePositiveInteger,
   sanitizeTimeString,
+  sanitizeTimezone,
+  sanitizeWeightLevel,
   serializeEnabledDays,
   type DayCode,
   type UserSettingsValues,
@@ -20,6 +23,11 @@ function formatSettings(record?: {
   enabledDays: string;
   eventBufferMinutes: number;
   schedulingLeadMinutes: number;
+  timezone: string;
+  weightStability: number;
+  weightUrgency: number;
+  weightWorkHours: number;
+  weightCrossDay: number;
 } | null): UserSettingsValues {
   if (!record) {
     return { ...DEFAULT_USER_SETTINGS };
@@ -29,7 +37,7 @@ function formatSettings(record?: {
     dayStart: sanitizeTimeString(record.dayStart, DEFAULT_USER_SETTINGS.dayStart),
     dayEnd: sanitizeTimeString(record.dayEnd, DEFAULT_USER_SETTINGS.dayEnd),
     enabledDays: parseEnabledDaysField(record.enabledDays),
-    eventBufferMinutes: sanitizePositiveInteger(
+    eventBufferMinutes: sanitizeBufferMinutes(
       record.eventBufferMinutes,
       DEFAULT_USER_SETTINGS.eventBufferMinutes,
     ),
@@ -37,6 +45,11 @@ function formatSettings(record?: {
       record.schedulingLeadMinutes,
       DEFAULT_USER_SETTINGS.schedulingLeadMinutes,
     ),
+    timezone: sanitizeTimezone(record.timezone, DEFAULT_USER_SETTINGS.timezone),
+    weightStability: sanitizeWeightLevel(record.weightStability, DEFAULT_USER_SETTINGS.weightStability),
+    weightUrgency: sanitizeWeightLevel(record.weightUrgency, DEFAULT_USER_SETTINGS.weightUrgency),
+    weightWorkHours: sanitizeWeightLevel(record.weightWorkHours, DEFAULT_USER_SETTINGS.weightWorkHours),
+    weightCrossDay: sanitizeWeightLevel(record.weightCrossDay, DEFAULT_USER_SETTINGS.weightCrossDay),
   };
 }
 
@@ -57,6 +70,11 @@ type IncomingSettings = {
   enabledDays?: DayCode[];
   eventBufferMinutes?: number;
   schedulingLeadMinutes?: number;
+  timezone?: string;
+  weightStability?: number;
+  weightUrgency?: number;
+  weightWorkHours?: number;
+  weightCrossDay?: number;
 };
 
 export async function PATCH(req: Request) {
@@ -82,12 +100,32 @@ export async function PATCH(req: Request) {
       : base.enabledDays;
   const eventBufferMinutes =
     body.eventBufferMinutes !== undefined
-      ? sanitizePositiveInteger(body.eventBufferMinutes, base.eventBufferMinutes)
+      ? sanitizeBufferMinutes(body.eventBufferMinutes, base.eventBufferMinutes)
       : base.eventBufferMinutes;
   const schedulingLeadMinutes =
     body.schedulingLeadMinutes !== undefined
       ? sanitizePositiveInteger(body.schedulingLeadMinutes, base.schedulingLeadMinutes)
       : base.schedulingLeadMinutes;
+  const timezone =
+    body.timezone !== undefined
+      ? sanitizeTimezone(body.timezone, base.timezone)
+      : base.timezone;
+  const weightStability =
+    body.weightStability !== undefined
+      ? sanitizeWeightLevel(body.weightStability, base.weightStability)
+      : base.weightStability;
+  const weightUrgency =
+    body.weightUrgency !== undefined
+      ? sanitizeWeightLevel(body.weightUrgency, base.weightUrgency)
+      : base.weightUrgency;
+  const weightWorkHours =
+    body.weightWorkHours !== undefined
+      ? sanitizeWeightLevel(body.weightWorkHours, base.weightWorkHours)
+      : base.weightWorkHours;
+  const weightCrossDay =
+    body.weightCrossDay !== undefined
+      ? sanitizeWeightLevel(body.weightCrossDay, base.weightCrossDay)
+      : base.weightCrossDay;
 
   const updatePayload = {
     dayStart,
@@ -95,6 +133,11 @@ export async function PATCH(req: Request) {
     enabledDays: serializeEnabledDays(enabledDays),
     eventBufferMinutes,
     schedulingLeadMinutes,
+    timezone,
+    weightStability,
+    weightUrgency,
+    weightWorkHours,
+    weightCrossDay,
   };
 
   const record = await prisma.userSettings.upsert({
@@ -109,6 +152,11 @@ export async function PATCH(req: Request) {
     enabledDays: parseEnabledDaysField(record.enabledDays),
     eventBufferMinutes: record.eventBufferMinutes,
     schedulingLeadMinutes: record.schedulingLeadMinutes,
+    timezone: record.timezone,
+    weightStability: record.weightStability,
+    weightUrgency: record.weightUrgency,
+    weightWorkHours: record.weightWorkHours,
+    weightCrossDay: record.weightCrossDay,
   });
 
   return NextResponse.json(merged);

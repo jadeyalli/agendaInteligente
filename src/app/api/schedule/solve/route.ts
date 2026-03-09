@@ -6,6 +6,7 @@ import {
   DEFAULT_USER_SETTINGS,
   JS_DAY_TO_DAY_CODE,
   dayCodesToWeekdayIndexes,
+  levelsToWeights,
   mergeUserSettings,
   parseEnabledDaysField,
   timeStringToParts,
@@ -158,6 +159,11 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
         enabledDays: parseEnabledDaysField(rawSettings.enabledDays),
         eventBufferMinutes: rawSettings.eventBufferMinutes,
         schedulingLeadMinutes: rawSettings.schedulingLeadMinutes,
+        timezone: rawSettings.timezone,
+        weightStability: rawSettings.weightStability,
+        weightUrgency: rawSettings.weightUrgency,
+        weightWorkHours: rawSettings.weightWorkHours,
+        weightCrossDay: rawSettings.weightCrossDay,
       })
     : { ...DEFAULT_USER_SETTINGS };
 
@@ -229,12 +235,7 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
       new: extraNew ?? [],
       newFixed: [],
     },
-    weights: {
-      move: { UnI: 20, InU: 10 },
-      distancePerSlot: { UnI: 4, InU: 1 },
-      offPreferencePerSlot: { UnI: 1, InU: 3 },
-      crossDayPerEvent: { UnI: 2, InU: 1 },
-    },
+    weights: levelsToWeights(settings),
     policy: {
       allowWeekend: activeDays.some((d) => d >= 5),
       noOverlapCapacity: 1,
