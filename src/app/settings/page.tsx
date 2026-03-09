@@ -23,6 +23,11 @@ async function loadUserSettings(userId: string): Promise<UserSettingsValues> {
     enabledDays: parseEnabledDaysField(record.enabledDays),
     eventBufferMinutes: record.eventBufferMinutes,
     schedulingLeadMinutes: record.schedulingLeadMinutes,
+    timezone: record.timezone,
+    weightStability: record.weightStability,
+    weightUrgency: record.weightUrgency,
+    weightWorkHours: record.weightWorkHours,
+    weightCrossDay: record.weightCrossDay,
   });
 }
 

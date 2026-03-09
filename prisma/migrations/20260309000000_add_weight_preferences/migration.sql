@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "UserSettings" ADD COLUMN "weightStability" INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE "UserSettings" ADD COLUMN "weightUrgency" INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE "UserSettings" ADD COLUMN "weightWorkHours" INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE "UserSettings" ADD COLUMN "weightCrossDay" INTEGER NOT NULL DEFAULT 2;
