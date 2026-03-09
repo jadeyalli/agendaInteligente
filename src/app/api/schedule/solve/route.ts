@@ -107,18 +107,29 @@ function generatePreferredRanges(
   horizonEnd: Date,
   settings: UserSettingsValues,
   tz: string,
+  perDaySlots?: Map<number, { startTime: string; endTime: string }>,
 ) {
   const ranges: { start: string; end: string }[] = [];
   const enabled = new Set<DayCode>(settings.enabledDays);
-  const { hour: startHour, minute: startMinute } = timeStringToParts(settings.dayStart);
-  const { hour: endHour, minute: endMinute } = timeStringToParts(settings.dayEnd);
+  const globalStart = timeStringToParts(settings.dayStart);
+  const globalEnd = timeStringToParts(settings.dayEnd);
 
   const cursor = new Date(horizonStart);
   cursor.setHours(0, 0, 0, 0);
 
   while (cursor <= horizonEnd) {
-    const dayCode = JS_DAY_TO_DAY_CODE[cursor.getDay()];
+    const jsDay = cursor.getDay();
+    const dayCode = JS_DAY_TO_DAY_CODE[jsDay];
     if (dayCode && enabled.has(dayCode)) {
+      // Use per-day slot if available, otherwise fall back to global
+      const slot = perDaySlots?.get(jsDay);
+      const { hour: startHour, minute: startMinute } = slot
+        ? timeStringToParts(slot.startTime)
+        : globalStart;
+      const { hour: endHour, minute: endMinute } = slot
+        ? timeStringToParts(slot.endTime)
+        : globalEnd;
+
       const dayStart = new Date(cursor);
       dayStart.setHours(startHour, startMinute, 0, 0);
       let dayEnd = new Date(cursor);
@@ -149,8 +160,17 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
   const horizonStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const horizonEnd = endOfMonth(now);
 
-  const rawSettings = await prisma.userSettings.findUnique({ where: { userId } });
+  const [rawSettings, slotRecords] = await Promise.all([
+    prisma.userSettings.findUnique({ where: { userId } }),
+    prisma.availabilitySlot.findMany({ where: { userId } }),
+  ]);
   const tz = rawSettings?.timezone ?? 'America/Mexico_City';
+
+  // Build per-day slots map (keyed by JS dayOfWeek)
+  const perDaySlots = new Map<number, { startTime: string; endTime: string }>();
+  for (const s of slotRecords) {
+    perDaySlots.set(s.dayOfWeek, { startTime: s.startTime, endTime: s.endTime });
+  }
 
   const settings = rawSettings
     ? mergeUserSettings({
@@ -213,7 +233,7 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
     }
   }
 
-  const preferredRanges = generatePreferredRanges(horizonStart, horizonEnd, settings, tz);
+  const preferredRanges = generatePreferredRanges(horizonStart, horizonEnd, settings, tz, perDaySlots);
   const activeDays = Array.from(new Set(dayCodesToWeekdayIndexes(settings.enabledDays))).sort(
     (a, b) => a - b,
   );
@@ -245,6 +265,7 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
       activeDays,
       eventBufferMinutes: settings.eventBufferMinutes,
       schedulingLeadMinutes: settings.schedulingLeadMinutes,
+      perDaySlots: Object.fromEntries(perDaySlots),
     },
   };
 

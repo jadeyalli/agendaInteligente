@@ -7,28 +7,40 @@ import {
   DEFAULT_USER_SETTINGS,
   mergeUserSettings,
   parseEnabledDaysField,
+  type AvailabilitySlotInput,
   type UserSettingsValues,
 } from '@/lib/user-settings';
 
 import SettingsForm from './SettingsForm';
 
-async function loadUserSettings(userId: string): Promise<UserSettingsValues> {
-  const record = await prisma.userSettings.findUnique({ where: { userId } });
-  if (!record) {
-    return { ...DEFAULT_USER_SETTINGS };
-  }
-  return mergeUserSettings({
-    dayStart: record.dayStart,
-    dayEnd: record.dayEnd,
-    enabledDays: parseEnabledDaysField(record.enabledDays),
-    eventBufferMinutes: record.eventBufferMinutes,
-    schedulingLeadMinutes: record.schedulingLeadMinutes,
-    timezone: record.timezone,
-    weightStability: record.weightStability,
-    weightUrgency: record.weightUrgency,
-    weightWorkHours: record.weightWorkHours,
-    weightCrossDay: record.weightCrossDay,
-  });
+async function loadUserSettings(userId: string): Promise<{ settings: UserSettingsValues; slots: AvailabilitySlotInput[] }> {
+  const [record, slotRecords] = await Promise.all([
+    prisma.userSettings.findUnique({ where: { userId } }),
+    prisma.availabilitySlot.findMany({ where: { userId } }),
+  ]);
+
+  const settings = record
+    ? mergeUserSettings({
+        dayStart: record.dayStart,
+        dayEnd: record.dayEnd,
+        enabledDays: parseEnabledDaysField(record.enabledDays),
+        eventBufferMinutes: record.eventBufferMinutes,
+        schedulingLeadMinutes: record.schedulingLeadMinutes,
+        timezone: record.timezone,
+        weightStability: record.weightStability,
+        weightUrgency: record.weightUrgency,
+        weightWorkHours: record.weightWorkHours,
+        weightCrossDay: record.weightCrossDay,
+      })
+    : { ...DEFAULT_USER_SETTINGS };
+
+  const slots: AvailabilitySlotInput[] = slotRecords.map((s) => ({
+    dayOfWeek: s.dayOfWeek,
+    startTime: s.startTime,
+    endTime: s.endTime,
+  }));
+
+  return { settings, slots };
 }
 
 export default async function SettingsPage() {
@@ -37,7 +49,7 @@ export default async function SettingsPage() {
     redirect('/login');
   }
 
-  const settings = await loadUserSettings(user.id);
+  const { settings, slots } = await loadUserSettings(user.id);
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
@@ -56,7 +68,7 @@ export default async function SettingsPage() {
           </p>
         </div>
 
-        <SettingsForm initialValues={settings} />
+        <SettingsForm initialValues={settings} initialSlots={slots} />
       </main>
     </div>
   );
