@@ -223,6 +223,26 @@ body {
   background: rgba(148, 163, 184, 0.26) !important;
 }
 
+/* Ventana RANGO: relleno con color de prioridad (viene de backgroundColor en el
+   evento FullCalendar) + borde izquierdo marcado + cursor pointer */
+.fc .fc-bg-event.bg-window-range {
+  opacity: 1 !important;           /* respetamos el alpha del backgroundColor */
+  border-left: 3px solid var(--window-border-color, currentColor) !important;
+  cursor: pointer;
+}
+.fc .fc-bg-event.bg-window-range:hover {
+  filter: brightness(1.15);
+}
+
+/* Ventanas suaves PRONTO / SEMANA / MES: sutil, casi imperceptible */
+.fc .fc-bg-event.bg-window-soft {
+  opacity: 1 !important;
+  cursor: pointer;
+}
+.fc .fc-bg-event.bg-window-soft:hover {
+  filter: brightness(1.1);
+}
+
 /* Vista anual 4x3 compacta (estilo Google) */
 .fc .fc-multimonth {
   display: grid !important;

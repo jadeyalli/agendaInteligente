@@ -659,6 +659,11 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
 
         // 3) Ventanas visuales opcionales
         if (windowCode && windowCode !== 'NONE') {
+          // Color de prioridad con alpha para el fondo (hex 8 dígitos: #rrggbbaa)
+          const winBg = labelColors[p] + '28';   // ~16 % opacidad
+          const winBgSoft = labelColors[p] + '14'; // ~8 % opacidad para ventanas suaves
+          const winBorder = labelColors[p];
+
           if (windowCode === 'RANGO' && row.windowStart) {
             const sDay = toDateOnly(row.windowStart)!;
             const eDay = row.windowEnd ? toDateOnly(row.windowEnd)! : undefined;
@@ -668,6 +673,8 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               start: sDay,
               end: eDay,
               display: 'background',
+              backgroundColor: winBg,
+              borderColor: winBorder,
               classNames: ['bg-window-range'],
               allDay: true,
               extendedProps: { kind, priority: row.priority, raw: row, isWindow: true },
@@ -679,6 +686,8 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               start: visibleRange.start,
               end: visibleRange.end,
               display: 'background',
+              backgroundColor: winBgSoft,
+              borderColor: winBorder,
               classNames: ['bg-window-soft'],
               extendedProps: { kind, priority: row.priority, raw: row, isWindow: true, code: windowCode },
             });
@@ -877,6 +886,22 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                     if (!raw) return;
                     setSelected(raw);
                     setOpenPreview(true);
+                  }}
+                  eventDidMount={(info) => {
+                    // Los background events (ventanas) no disparan eventClick de FullCalendar,
+                    // así que agregamos el listener manualmente al elemento DOM.
+                    const { isWindow, raw } = info.event.extendedProps ?? {};
+                    if (!isWindow || !raw) return;
+                    const el = info.el;
+                    el.style.cursor = 'pointer';
+                    el.title = (raw as PreviewRow).title ?? '';
+                    const handler = () => {
+                      setSelected(raw as PreviewRow);
+                      setOpenPreview(true);
+                    };
+                    el.addEventListener('click', handler);
+                    // Cleanup al desmontar el elemento
+                    return () => el.removeEventListener('click', handler);
                   }}
                   dateClick={(arg) => {
                     api()?.changeView('timeGridDay', arg.date);

@@ -279,6 +279,10 @@ async function main() {
       title: 'Taller de TypeScript avanzado — RELEVANTE',
       description: 'Solo disponible dentro de la ventana de la próxima quincena.',
       priority: Priority.RELEVANTE,
+      // start/end dan posición inicial sugerida; el scheduler puede moverlo
+      // dentro de la ventana RANGO (windowStart→windowEnd)
+      start: today(9, 0, 5),
+      end: addMinutes(today(9, 0, 5), 240),
       durationMinutes: 240,
       isFixed: false,
       isInPerson: true,
