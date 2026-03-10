@@ -5,6 +5,11 @@
   "scripts": {
     "db:migrate": "prisma migrate deploy || prisma db push",
     "db:prepare": "npm run db:migrate --silent && prisma generate",
+    "db:reset": "npx tsx scripts/reset-db.ts",
+    "db:seed-events": "npx tsx scripts/seed-events.ts",
+    "db:seed-reminders": "npx tsx scripts/seed-reminders.ts",
+    "db:seed": "npm run db:seed-events && npm run db:seed-reminders",
+    "db:fresh": "npm run db:reset && npm run db:seed",
     "predev": "npm run db:prepare",
     "prestart": "npm run db:prepare",
     "dev": "next dev",
