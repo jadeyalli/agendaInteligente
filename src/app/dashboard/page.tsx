@@ -3,6 +3,7 @@ import '../globals.css';
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Calendar as CalendarIcon,
   Clock3,
@@ -12,6 +13,7 @@ import {
   Palette,
   ChevronsLeft,
   ChevronsRight,
+  LogOut,
 } from 'lucide-react';
 
 import { type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
@@ -38,8 +40,14 @@ const NAV: NavItem[] = [
 ];
 
 export default function DashboardHomePage() {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+  }
 
   // === Tema ===
   const [theme, setTheme] = useState<ThemeKey>(currentTheme());
@@ -106,6 +114,17 @@ export default function DashboardHomePage() {
               ))}
             </nav>
 
+            <div className="mt-auto">
+              <button
+                onClick={handleLogout}
+                className="flex w-full items-center gap-3 rounded-xl px-4 py-2 text-sm font-medium text-[var(--muted)] transition-colors duration-200 hover:bg-red-50 hover:text-red-600"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900/5 text-slate-600">
+                  <LogOut className="h-4 w-4" />
+                </span>
+                <span>Cerrar sesión</span>
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -147,6 +166,18 @@ export default function DashboardHomePage() {
                   </Link>
                 ))}
               </nav>
+
+              <div className="mt-auto">
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-3 rounded-xl px-4 py-2 text-sm font-medium text-[var(--muted)] transition-colors duration-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900/5 text-slate-600">
+                    <LogOut className="h-4 w-4" />
+                  </span>
+                  <span>Cerrar sesión</span>
+                </button>
+              </div>
             </aside>
           </div>
         )}

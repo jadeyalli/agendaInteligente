@@ -69,26 +69,45 @@ async function runSolver(input: SolvePayload) {
   const pythonBin = process.env.PYTHON_BIN || 'python'; // setea PYTHON_BIN si usas otro
   const script = process.cwd() + '/solver.py';
 
+  const TIMEOUT_MS = 30_000; // 30 segundos máximo
+
   return new Promise<unknown>((resolve, reject) => {
     const child = spawn(pythonBin, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error('El solver tardó demasiado (timeout 30 s).'));
+    }, TIMEOUT_MS);
+
+    const done = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
 
     child.stdout.on('data', (d) => (out += d.toString()));
     child.stderr.on('data', (d) => (err += d.toString()));
 
-    child.on('error', (e) => reject(new Error('No se pudo ejecutar Python: ' + e.message)));
+    child.on('error', (e) => done(() => reject(new Error('No se pudo ejecutar Python: ' + e.message))));
     child.on('close', (code) => {
-      if (code !== 0) {
-        return reject(new Error(`Solver salió con código ${code}\n${err || out}`));
-      }
-      try {
-        const json = JSON.parse(out.trim());
-        resolve(json);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        reject(new Error('No se pudo parsear salida del solver: ' + msg + '\n' + out));
-      }
+      done(() => {
+        if (code !== 0) {
+          return reject(new Error(`Solver salió con código ${code}\n${err || out}`));
+        }
+        try {
+          const json = JSON.parse(out.trim());
+          resolve(json);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          reject(new Error('No se pudo parsear salida del solver: ' + msg + '\n' + out));
+        }
+      });
     });
 
     child.stdin.write(JSON.stringify(input));
