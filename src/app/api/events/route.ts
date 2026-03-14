@@ -846,6 +846,7 @@ export async function POST(req: Request) {
     }
 
     let items: Event[];
+    let displaced = { movedCount: 0, waitlistedCount: 0 };
     if (data.kind === 'EVENTO') {
       const schedulingPreferences = await loadSchedulingPreferences(user.id);
       const schedulingContext = buildSchedulingContext(schedulingPreferences);
@@ -854,7 +855,7 @@ export async function POST(req: Request) {
       await scheduleFlexibleEvents(user.id, created, schedulingContext);
       const createdIds = created.map((item) => item.id);
       const scheduled = await prisma.event.findMany({ where: { id: { in: createdIds } } });
-      await preemptLowerPriorityEvents(user.id, scheduled, schedulingContext);
+      displaced = await preemptLowerPriorityEvents(user.id, scheduled, schedulingContext);
       const refreshed = await prisma.event.findMany({ where: { id: { in: createdIds } } });
       const byId = new Map(refreshed.map((item) => [item.id, item]));
       items = createdIds.map((id) => byId.get(id)).filter((item): item is Event => Boolean(item));
@@ -865,8 +866,8 @@ export async function POST(req: Request) {
     } else {
       throw new Error('Invalid event kind');
     }
-    
-    return NextResponse.json({ count: items.length, items }, { status: 201 });
+
+    return NextResponse.json({ count: items.length, items, displaced }, { status: 201 });
   } catch (e: unknown) {
     console.error('POST /api/events error', e);
     const message = e instanceof Error ? e.message : 'Server error';

@@ -369,11 +369,15 @@ function lowerPriorityTargets(priority: Priority): Priority[] {
     .map((candidate) => candidate as Priority);
 }
 
+export type DisplacedSummary = { movedCount: number; waitlistedCount: number };
+
 export async function preemptLowerPriorityEvents(
   userId: string,
   newEvents: Event[],
   context: SchedulingContext,
-) {
+): Promise<DisplacedSummary> {
+  let movedCount = 0;
+  let waitlistedCount = 0;
   for (const current of newEvents) {
     if (current.kind !== 'EVENTO' || !current.start || !current.end) continue;
 
@@ -434,6 +438,7 @@ export async function preemptLowerPriorityEvents(
             participatesInScheduling: false,
           },
         });
+        waitlistedCount += 1;
         continue;
       }
 
@@ -450,6 +455,7 @@ export async function preemptLowerPriorityEvents(
             participatesInScheduling: false,
           },
         });
+        waitlistedCount += 1;
         continue;
       }
 
@@ -463,6 +469,7 @@ export async function preemptLowerPriorityEvents(
           participatesInScheduling: true,
         },
       });
+      movedCount += 1;
       busy = upsertInterval(busy, { start: nextSlot, end: nextEnd });
     }
 
@@ -472,6 +479,8 @@ export async function preemptLowerPriorityEvents(
       );
     }
   }
+
+  return { movedCount, waitlistedCount };
 }
 
 export async function scheduleFlexibleEvents(

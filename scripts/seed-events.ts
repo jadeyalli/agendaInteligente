@@ -6,8 +6,8 @@
  * Uso: npm run db:seed-events
  *
  * Usuario creado:
- *   Email:    test@agenda.com
- *   Password: Test1234!
+ *   Email:    SEED_EMAIL    (env var, default: test@agenda.com)
+ *   Password: SEED_PASSWORD (env var, default: generada y mostrada en consola)
  */
 
 import { PrismaClient, Priority, EventKind, RepeatRule, AvailabilityWindow } from '@prisma/client';
@@ -41,7 +41,12 @@ async function main() {
   console.log('🌱 Iniciando seed de eventos de prueba...\n');
 
   // ── Usuario ──────────────────────────────────────────────────────────────
-  const email = 'test@agenda.com';
+  const email = process.env.SEED_EMAIL ?? 'test@agenda.com';
+  const rawPassword = process.env.SEED_PASSWORD;
+  const password = rawPassword ?? randomBytes(10).toString('hex');
+  if (!rawPassword) {
+    console.log(`ℹ️  SEED_PASSWORD no definida. Contraseña generada: ${password}`);
+  }
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -51,7 +56,7 @@ async function main() {
   const user = existing ?? (await prisma.user.create({
     data: {
       email,
-      password: hashPassword('Test1234!'),
+      password: hashPassword(password),
       name: 'Usuario de Prueba',
     },
   }));

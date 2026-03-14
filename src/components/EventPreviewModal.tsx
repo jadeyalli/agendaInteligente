@@ -1,8 +1,8 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Pencil, Trash2, Tag, Flag } from 'lucide-react';
-import React from 'react';
+import { X, Pencil, Trash2, Tag, Flag, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
 
 export type EventRow = {
   id: string;
@@ -52,6 +52,8 @@ export default function EventPreviewModal({
   onDelete: (e: EventRow) => void;
   deleting?: boolean;
 }) {
+  const [confirming, setConfirming] = useState(false);
+
   const priority = event?.priority ?? null;
   const badge =
     priority && badgeByPriority[priority]
@@ -59,6 +61,11 @@ export default function EventPreviewModal({
       : 'bg-slate-400 text-white';
 
   const isTask = event?.kind === 'TAREA';
+
+  function handleCloseReset() {
+    setConfirming(false);
+    onClose();
+  }
 
   return (
     <AnimatePresence>
@@ -71,7 +78,7 @@ export default function EventPreviewModal({
           role="dialog"
           aria-modal="true"
         >
-          <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+          <div className="absolute inset-0 bg-black/30" onClick={handleCloseReset} />
           <motion.div
             initial={{ y: 16, scale: 0.98, opacity: 0 }}
             animate={{ y: 0, scale: 1, opacity: 1 }}
@@ -102,12 +109,39 @@ export default function EventPreviewModal({
               </div>
               <button
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-700 hover:bg-slate-50"
-                onClick={onClose}
+                onClick={handleCloseReset}
                 aria-label="Cerrar"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {/* Confirmación de borrado */}
+            {confirming && (
+              <div className="flex items-center justify-between gap-3 border-b border-rose-100 bg-rose-50 px-5 py-3">
+                <div className="flex items-center gap-2 text-sm text-rose-700">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>¿Eliminar este evento? Esta acción no se puede deshacer.</span>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                    onClick={() => setConfirming(false)}
+                    type="button"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="rounded-lg bg-rose-600 px-3 py-1 text-xs text-white hover:bg-rose-700 disabled:opacity-60"
+                    onClick={() => { setConfirming(false); onDelete(event); }}
+                    disabled={deleting}
+                    type="button"
+                  >
+                    {deleting ? 'Eliminando…' : 'Sí, eliminar'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Body */}
             <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
@@ -151,11 +185,11 @@ export default function EventPreviewModal({
                 </button>
                 <button
                   className="inline-flex items-center gap-2 rounded-xl border border-rose-600 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                  onClick={() => onDelete(event)}
-                  disabled={deleting}
+                  onClick={() => setConfirming(true)}
+                  disabled={deleting || confirming}
                 >
                   <Trash2 className="h-4 w-4" />
-                  {deleting ? 'Eliminando…' : 'Eliminar'}
+                  Eliminar
                 </button>
               </div>
             </div>

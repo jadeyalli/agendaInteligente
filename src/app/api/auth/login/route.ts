@@ -3,8 +3,23 @@ import { cookies } from 'next/headers';
 
 import { prisma } from '@/lib/prisma';
 import { validateEmail, validatePassword, verifyPassword } from '@/lib/auth';
+import { getClientIp, rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const { allowed, remaining, resetAt } = rateLimit(`login:${ip}`, 10, 60_000); // 10 intentos/min
+  if (!allowed) {
+    return NextResponse.json(
+      { message: 'Demasiados intentos. Espera un momento e inténtalo de nuevo.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil((resetAt.getTime() - Date.now()) / 1000)),
+          'X-RateLimit-Remaining': String(remaining),
+        },
+      },
+    );
+  }
   const body = await request.json().catch(() => null);
 
   if (!body || typeof body !== 'object') {

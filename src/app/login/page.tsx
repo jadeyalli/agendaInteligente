@@ -25,6 +25,13 @@ export default function LoginPage() {
     setSuccess('');
 
     const trimmedEmail = email.trim();
+    const trimmedName = name.trim();
+
+    if (isRegister && !trimmedName) {
+      setError('El nombre es obligatorio para crear una cuenta.');
+      return;
+    }
+
     if (!trimmedEmail.includes('@')) {
       setError('El correo debe incluir un @.');
       return;
@@ -37,14 +44,19 @@ export default function LoginPage() {
 
     setLoading(true);
 
+    const browserTimezone = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; }
+    })();
+
     try {
       const response = await fetch(`/api/auth/${mode === 'register' ? 'register' : 'login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(),
+          name: trimmedName,
           email: trimmedEmail,
           password,
+          ...(isRegister && browserTimezone ? { timezone: browserTimezone } : {}),
         }),
       });
 
@@ -56,7 +68,7 @@ export default function LoginPage() {
       }
 
       setSuccess(typeof data?.message === 'string' ? data.message : 'Operación exitosa.');
-      const destination = isRegister ? '/settings?first=1' : '/dashboard';
+      const destination = isRegister ? '/profile?first=1' : '/dashboard';
       router.push(destination);
     } catch (submitError) {
       console.error(submitError);
@@ -130,7 +142,7 @@ export default function LoginPage() {
             {isRegister && (
               <div className="space-y-2">
                 <label htmlFor="name" className="block text-sm font-medium text-[var(--fg)]">
-                  Nombre
+                  Nombre <span className="text-rose-500">*</span>
                 </label>
                 <input
                   id="name"

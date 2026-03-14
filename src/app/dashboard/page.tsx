@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   Calendar as CalendarIcon,
   Clock3,
-  Settings,
+  User,
   Menu,
   X,
   Palette,
@@ -35,14 +35,32 @@ type NavItem = { href: string; label: string; icon: React.ReactNode; active?: bo
 
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Calendario', icon: <CalendarIcon className="h-4 w-4" />, active: true },
-  { href: '/dashboard#waitlist', label: 'Lista de espera', icon: <Clock3 className="h-4 w-4" /> },
-  { href: '/settings', label: 'Configuración', icon: <Settings className="h-4 w-4" /> },
+  { href: '/dashboard/waitlist', label: 'Lista de espera', icon: <Clock3 className="h-4 w-4" /> },
+  { href: '/profile', label: 'Perfil', icon: <User className="h-4 w-4" /> },
 ];
+
+function getInitials(name?: string | null, email?: string | null): string {
+  if (name) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  if (email) return email.slice(0, 2).toUpperCase();
+  return '?';
+}
 
 export default function DashboardHomePage() {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ name?: string | null; email?: string | null } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setCurrentUser(data); })
+      .catch(() => {});
+  }, []);
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -230,7 +248,12 @@ export default function DashboardHomePage() {
                     <Palette className="h-4 w-4" />
                   </span>
                 </div>
-                <div className="ml-1 h-10 w-10 rounded-full bg-gradient-to-br from-slate-300 via-slate-200 to-slate-500 shadow-inner" />
+                <div
+                  className="ml-1 flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 via-purple-400 to-sky-400 text-sm font-semibold text-white shadow-inner"
+                  title={currentUser?.name ?? currentUser?.email ?? 'Usuario'}
+                >
+                  {getInitials(currentUser?.name, currentUser?.email)}
+                </div>
               </div>
             </div>
           </header>

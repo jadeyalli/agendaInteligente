@@ -399,10 +399,19 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: Eve
   const isReminder = f.priority === "RECORDATORIO";
   const parsedDuration = Number.parseFloat(f.durationHours ?? "");
   const hasDuration = isUrgRel ? Number.isFinite(parsedDuration) && parsedDuration > 0 : true;
+
+  const rangeError: string | null = (() => {
+    if (!isUrgRel || f.window !== "RANGO") return null;
+    if (!f.windowStart || !f.windowEnd) return "Selecciona fecha de inicio y fin del rango.";
+    if (f.windowEnd <= f.windowStart) return "La fecha de fin debe ser posterior a la de inicio.";
+    return null;
+  })();
+
   const canSubmit =
     f.title.trim().length > 0 &&
     (!isCritica || (f.date && f.timeStart && f.timeEnd)) &&
-    hasDuration;
+    hasDuration &&
+    rangeError === null;
 
   return (
     <div className="space-y-4">
@@ -509,14 +518,19 @@ const CrearEvento: React.FC<{ initial?: Partial<EventForm>; onSubmit: (data: Eve
             </Field>
           </Row>
           {f.window === "RANGO" && (
-            <Row>
-              <Field label="Inicio" labelIcon={<Calendar className="h-4 w-4" />}>
-                <Input type="date" value={f.windowStart} onChange={(e) => set({ ...f, windowStart: e.target.value })} />
-              </Field>
-              <Field label="Fin" labelIcon={<Calendar className="h-4 w-4" />}>
-                <Input type="date" value={f.windowEnd} onChange={(e) => set({ ...f, windowEnd: e.target.value })} />
-              </Field>
-            </Row>
+            <>
+              <Row>
+                <Field label="Inicio del rango" labelIcon={<Calendar className="h-4 w-4" />}>
+                  <Input type="date" value={f.windowStart} onChange={(e) => set({ ...f, windowStart: e.target.value })} />
+                </Field>
+                <Field label="Fin del rango" labelIcon={<Calendar className="h-4 w-4" />}>
+                  <Input type="date" value={f.windowEnd} onChange={(e) => set({ ...f, windowEnd: e.target.value })} />
+                </Field>
+              </Row>
+              {rangeError && (
+                <p className="text-sm text-red-600">{rangeError}</p>
+              )}
+            </>
           )}
         </>
       )}

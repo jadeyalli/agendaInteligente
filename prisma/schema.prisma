@@ -2,8 +2,11 @@
 // Datasource & Generator
 // =====================
 datasource db {
+  // Para desarrollo local usa SQLite (DATABASE_URL="file:./dev.db").
+  // Para producción cambia el provider a "postgresql" y apunta DATABASE_URL
+  // a tu cadena de conexión PostgreSQL (ver .env.example).
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -205,6 +208,7 @@ model Event {
   updatedAt DateTime @updatedAt
 
   @@unique([calendarId, uid])
+  @@index([userId])
   @@index([userId, start])
   @@index([calendarId, start])
   @@index([status])

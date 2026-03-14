@@ -1,5 +1,6 @@
 // app/api/schedule/solve/route.ts
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
 import {
@@ -63,6 +64,32 @@ function defaultWindowFor(p: Priority): 'PRONTO'|'SEMANA'|'MES' {
   if (p === 'RELEVANTE') return 'MES';
   return 'SEMANA';
 }
+
+// ———————————— Esquema de validación de salida del solver ————————————
+const SolverOutputSchema = z.object({
+  placed: z.array(z.object({
+    id: z.string(),
+    start: z.string(),
+    end: z.string(),
+  })),
+  moved: z.array(z.object({
+    id: z.string(),
+    fromStart: z.string().nullable(),
+    toStart: z.string(),
+    reason: z.string(),
+  })),
+  unplaced: z.array(z.object({
+    id: z.string(),
+    reason: z.string(),
+  })),
+  score: z.number().nullable(),
+  diagnostics: z.object({
+    hardConflicts: z.array(z.string()),
+    summary: z.string(),
+  }),
+});
+
+export type SolverOutput = z.infer<typeof SolverOutputSchema>;
 
 // ———————————— Llamada al solver (python) ————————————
 async function runSolver(input: SolvePayload) {
@@ -304,9 +331,14 @@ export async function POST(req: Request) {
 
     const extraNew = Array.isArray(body?.new) ? body.new : [];
     const payload = await buildPayloadForUser(user.id, extraNew);
-    const result = await runSolver(payload);
+    const raw = await runSolver(payload);
+    const parsed = SolverOutputSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.error('POST /api/schedule/solve: respuesta inválida del solver', parsed.error.flatten());
+      return NextResponse.json({ error: 'Respuesta del solver con formato inesperado.' }, { status: 502 });
+    }
 
-    return NextResponse.json(result);
+    return NextResponse.json(parsed.data);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Server error';
     console.error('POST /api/schedule/solve error', e);

@@ -9,9 +9,13 @@ import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
+import { CalendarX2, Download } from 'lucide-react';
+import Link from 'next/link';
+
 import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
+import { useToast } from '@/components/ui/ToastProvider';
 
 import { THEMES, currentTheme } from '@/theme/themes';
 import {
@@ -30,36 +34,20 @@ import {
   isoToDate,
   resolveBrowserTimezone,
 } from '@/lib/timezone';
+import {
+  buildWaitlistGroups,
+  KIND_LABELS,
+  WAITLIST_CATEGORY_ORDER,
+  WAITLIST_WINDOW_LABELS,
+  type EventRow,
+  type WaitlistGroup,
+} from '@/lib/waitlist-utils';
 
 export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
 export type CalendarMeta = { view: ViewId; title: string; start: Date; end: Date };
 export type CalendarProps = { onViewChange?: (meta: CalendarMeta) => void };
 
 type PriorityCode = 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
-
-type EventRow = {
-  id: string;
-  kind: 'EVENTO' | 'TAREA' | 'SOLICITUD' | 'RECORDATORIO';
-  title: string;
-  description?: string | null;
-  category?: string | null;
-  priority?: 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO' | null;
-  status?: string | null;
-
-  // tiempo
-  start?: string | null;
-  end?: string | null;
-  isAllDay?: boolean | null;
-
-  // tarea
-  dueDate?: string | null;
-
-  // ventana
-  window?: 'NONE' | 'PRONTO' | 'SEMANA' | 'MES' | 'RANGO' | null;
-  windowStart?: string | null;
-  windowEnd?: string | null;
-  durationMinutes?: number | null;
-};
 
 type ModalInitialEvent = {
   kind: 'EVENTO';
@@ -87,39 +75,21 @@ type ModalInitialReminder = {
   timeEnd: string;
 };
 
-type ModalInitialReminder = {
-  kind: 'RECORDATORIO';
+type ModalInitialTask = {
+  kind: 'TAREA';
   title: string;
   description: string;
   category: string;
+  priority: PriorityCode;
   repeat: 'NONE';
-  isAllDay: boolean;
   date: string;
-  timeStart: string;
-  timeEnd: string;
 };
 
 type ModalInitial = ModalInitialEvent | ModalInitialTask | ModalInitialReminder;
 
-type WaitlistGroup = { category: string; events: EventRow[] };
-
-const WAITLIST_CATEGORY_ORDER = ['Escuela', 'Trabajo', 'Personal', 'Familia', 'Salud', 'Otros'];
-
-const WAITLIST_WINDOW_LABELS: Record<Exclude<EventRow['window'], null | 'NONE'>, string> = {
-  PRONTO: 'Próximos días',
-  SEMANA: 'Esta semana',
-  MES: 'Este mes',
-  RANGO: 'Rango sugerido',
-};
-
-const KIND_LABELS: Record<EventRow['kind'], string> = {
-  EVENTO: 'Evento',
-  TAREA: 'Tarea',
-  SOLICITUD: 'Solicitud',
-  RECORDATORIO: 'Recordatorio',
-};
-
 export default function Calendar({ onViewChange }: CalendarProps) {
+  const { toast } = useToast();
+
   // === tema (escucha cambios emitidos por la página) ===
   const [theme, setTheme] = useState(currentTheme());
   useEffect(() => {
@@ -200,8 +170,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       if (!res.ok) throw new Error('No se pudieron cargar los eventos');
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // fallo silencioso en cliente; el empty state ya comunica la ausencia de datos
     } finally {
       setLoading(false);
     }
@@ -269,57 +239,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     return jsIndexes;
   }, [disabledWeekdayIndexes]);
 
-  const waitlistGroups = useMemo<WaitlistGroup[]>(() => {
-    if (!rows.length) return [];
-    const groups = new Map<string, EventRow[]>();
-
-    const normalizeCategory = (value?: string | null) => {
-      if (!value) return 'Otros';
-      const trimmed = value.trim();
-      if (!trimmed) return 'Otros';
-      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-    };
-
-    for (const row of rows) {
-      const priority = row.priority ?? undefined;
-      const status = typeof row.status === 'string' ? row.status.toUpperCase() : '';
-      if (priority !== 'OPCIONAL' && status !== 'WAITLIST') continue;
-      if (row.kind === 'RECORDATORIO') continue;
-
-      const category = normalizeCategory(row.category);
-      if (!groups.has(category)) {
-        groups.set(category, []);
-      }
-      groups.get(category)!.push(row);
-    }
-
-    const entries: WaitlistGroup[] = [];
-    const getSortValue = (row: EventRow) => (row.start ? new Date(row.start).getTime() : Number.MAX_SAFE_INTEGER);
-
-    for (const [category, events] of groups.entries()) {
-      entries.push({
-        category,
-        events: events
-          .slice()
-          .sort((a, b) => {
-            const diff = getSortValue(a) - getSortValue(b);
-            if (diff !== 0) return diff;
-            return a.title.localeCompare(b.title, 'es');
-          }),
-      });
-    }
-
-    entries.sort((a, b) => {
-      const idxA = WAITLIST_CATEGORY_ORDER.indexOf(a.category);
-      const idxB = WAITLIST_CATEGORY_ORDER.indexOf(b.category);
-      const orderA = idxA === -1 ? WAITLIST_CATEGORY_ORDER.length : idxA;
-      const orderB = idxB === -1 ? WAITLIST_CATEGORY_ORDER.length : idxB;
-      if (orderA !== orderB) return orderA - orderB;
-      return a.category.localeCompare(b.category, 'es');
-    });
-
-    return entries;
-  }, [rows]);
+  const waitlistGroups = useMemo(() => buildWaitlistGroups(rows), [rows]);
 
   const waitlistTotal = useMemo(
     () => waitlistGroups.reduce((sum, group) => sum + group.events.length, 0),
@@ -417,6 +337,48 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo crear');
       }
+      const created = await res.json().catch(() => ({ items: [] }));
+      const items: Array<{ status?: string; priority?: string }> = Array.isArray(created?.items) ? created.items : [];
+      const displaced = created?.displaced as { movedCount?: number; waitlistedCount?: number } | undefined;
+
+      const wentToWaitlist = items.some((ev) => ev.status === 'WAITLIST');
+      const isSchedulingPolicy = items.some(
+        (ev) => ev.status === 'WAITLIST' && (!ev.priority || ev.priority === 'OPCIONAL'),
+      );
+
+      if (wentToWaitlist) {
+        if (isSchedulingPolicy) {
+          toast('El evento fue a la lista de espera (prioridad Opcional).', 'info', 5000);
+        } else {
+          toast('No se encontró horario disponible. El evento quedó en lista de espera.', 'warning', 6000);
+        }
+      } else if (items.length > 0) {
+        toast('Evento creado correctamente.', 'success');
+      }
+
+      if (displaced) {
+        const { movedCount = 0, waitlistedCount = 0 } = displaced;
+        if (movedCount > 0 && waitlistedCount > 0) {
+          toast(
+            `${movedCount} evento${movedCount > 1 ? 's' : ''} reubicado${movedCount > 1 ? 's' : ''} y ${waitlistedCount} en lista de espera por la nueva prioridad.`,
+            'info',
+            6000,
+          );
+        } else if (movedCount > 0) {
+          toast(
+            `${movedCount} evento${movedCount > 1 ? 's' : ''} de menor prioridad ${movedCount > 1 ? 'fueron reubicados' : 'fue reubicado'} automáticamente.`,
+            'info',
+            5000,
+          );
+        } else if (waitlistedCount > 0) {
+          toast(
+            `${waitlistedCount} evento${waitlistedCount > 1 ? 's' : ''} de menor prioridad ${waitlistedCount > 1 ? 'pasaron' : 'pasó'} a lista de espera.`,
+            'warning',
+            5000,
+          );
+        }
+      }
+
       const waitlistSource = waitlistPromoteRef.current;
       setOpenCreate(false);
       setCreateInitial(null);
@@ -436,13 +398,13 @@ export default function Calendar({ onViewChange }: CalendarProps) {
             deleteError instanceof Error
               ? deleteError.message
               : 'No se pudo eliminar de la lista de espera';
-          alert(message);
+          toast(message, 'error');
         }
       }
       await loadEvents();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error al crear';
-      alert(message);
+      toast(message, 'error');
     } finally {
       setCreating(false);
     }
@@ -476,10 +438,11 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       }
       setOpenEdit(false);
       setEditingId(null);
+      toast('Evento actualizado.', 'success');
       await loadEvents();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error al actualizar';
-      alert(message);
+      toast(message, 'error');
     } finally {
       setCreating(false);
     }
@@ -500,10 +463,11 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       }
       setOpenPreview(false);
       setSelected(null);
+      toast('Evento eliminado.', 'success');
       await loadEvents();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error al eliminar';
-      alert(message);
+      toast(message, 'error');
     } finally {
       setDeleting(false);
     }
@@ -646,7 +610,7 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
         if (kind === 'TAREA' && dueStr) {
           out.push({
             id: row.id,
-            title: `🗒️ ${row.title}`,
+            title: row.title,
             start: toDateOnly(dueStr)!,
             allDay: true,
             classNames,
@@ -842,12 +806,28 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
             >
               Importar .ICS
             </button>
+            <a
+              href="/api/export-ics"
+              download
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Exportar .ICS
+            </a>
           </div>
         </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-[var(--surface)]/90 shadow-sm">
+          {!loading && rows.length === 0 && (
+            <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
+              <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/90 px-4 py-2 shadow-sm">
+                <CalendarX2 className="h-4 w-4 shrink-0 text-slate-400" />
+                <p className="text-sm text-slate-500">Sin eventos — crea uno o importa un .ICS</p>
+              </div>
+            </div>
+          )}
           <div className="relative h-full overflow-hidden">
             <div className="h-full overflow-y-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
               <div className={['px-2 pb-4 pt-3 sm:px-4', viewTransitioning ? 'calendar-fade' : ''].join(' ')}>
@@ -984,76 +964,72 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                 </p>
               </div>
             ) : (
-              <div className="space-y-6">
-                {waitlistGroups.map((group) => (
-                  <section key={group.category} className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-[var(--fg)]">{group.category}</h3>
-                      <span className="text-xs font-medium text-[var(--muted)]">
-                        {group.events.length} {group.events.length === 1 ? 'evento' : 'eventos'}
-                      </span>
-                    </div>
-                    <div className="space-y-3">
-                      {group.events.map((event) => {
-                        const suggestion = formatSuggestedTime(event);
-                        const windowText = formatWindow(event);
-                        const durationText = formatDuration(event);
-                        const kindLabel = KIND_LABELS[event.kind] ?? event.kind;
-                        const isActive = waitlistPromotingId === event.id;
-                        const isPromoting = creating && isActive;
-                        return (
-                          <article
-                            key={event.id}
-                            className="rounded-2xl border border-slate-200/70 bg-white/70 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="space-y-2">
-                                <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                                  <span className="inline-flex items-center rounded-full bg-slate-900/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                                    {kindLabel}
-                                  </span>
-                                  <span className="text-indigo-500">Opcional</span>
-                                </div>
-                                <h4 className="text-sm font-semibold text-[var(--fg)]">{event.title}</h4>
-                                {event.description ? (
-                                  <p className="text-xs text-[var(--muted)]">{event.description}</p>
-                                ) : null}
-                                <dl className="space-y-1 text-xs text-[var(--muted)]">
-                                  {suggestion ? (
-                                    <div>
-                                      <dt className="sr-only">Sugerencia</dt>
-                                      <dd>{suggestion}</dd>
-                                    </div>
-                                  ) : null}
-                                  {windowText ? (
-                                    <div>
-                                      <dt className="sr-only">Ventana sugerida</dt>
-                                      <dd>Ventana: {windowText}</dd>
-                                    </div>
-                                  ) : null}
-                                  {durationText ? (
-                                    <div>
-                                      <dt className="sr-only">Duración estimada</dt>
-                                      <dd>Duración: {durationText}</dd>
-                                    </div>
-                                  ) : null}
-                                </dl>
+              <div className="space-y-3">
+                {waitlistGroups.flatMap((g) => g.events).slice(0, 4).map((event) => {
+                  const suggestion = formatSuggestedTime(event);
+                  const windowText = formatWindow(event);
+                  const durationText = formatDuration(event);
+                  const kindLabel = KIND_LABELS[event.kind] ?? event.kind;
+                  const isActive = waitlistPromotingId === event.id;
+                  const isPromoting = creating && isActive;
+                  return (
+                    <article
+                      key={event.id}
+                      className="rounded-2xl border border-slate-200/70 bg-white/70 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                            <span className="inline-flex items-center rounded-full bg-slate-900/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                              {kindLabel}
+                            </span>
+                            <span className="text-indigo-500">Opcional</span>
+                          </div>
+                          <h4 className="text-sm font-semibold text-[var(--fg)]">{event.title}</h4>
+                          {event.description ? (
+                            <p className="text-xs text-[var(--muted)]">{event.description}</p>
+                          ) : null}
+                          <dl className="space-y-1 text-xs text-[var(--muted)]">
+                            {suggestion ? (
+                              <div>
+                                <dt className="sr-only">Sugerencia</dt>
+                                <dd>{suggestion}</dd>
                               </div>
-                              <button
-                                type="button"
-                                className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                onClick={() => handleScheduleFromWaitlist(event)}
-                                disabled={creating || isActive}
-                              >
-                                {isPromoting ? 'Agendando…' : isActive ? 'Configurando…' : 'Agendar'}
-                              </button>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))}
+                            ) : null}
+                            {windowText ? (
+                              <div>
+                                <dt className="sr-only">Ventana sugerida</dt>
+                                <dd>Ventana: {windowText}</dd>
+                              </div>
+                            ) : null}
+                            {durationText ? (
+                              <div>
+                                <dt className="sr-only">Duración estimada</dt>
+                                <dd>Duración: {durationText}</dd>
+                              </div>
+                            ) : null}
+                          </dl>
+                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={() => handleScheduleFromWaitlist(event)}
+                          disabled={creating || isActive}
+                        >
+                          {isPromoting ? 'Agendando…' : isActive ? 'Configurando…' : 'Agendar'}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+                {waitlistTotal > 4 && (
+                  <Link
+                    href="/dashboard/waitlist"
+                    className="flex w-full items-center justify-center gap-1 rounded-2xl border border-slate-200/70 py-2.5 text-xs font-medium text-[var(--muted)] transition hover:border-slate-300 hover:text-[var(--fg)]"
+                  >
+                    Ver todos ({waitlistTotal}) →
+                  </Link>
+                )}
               </div>
             )}
           </div>

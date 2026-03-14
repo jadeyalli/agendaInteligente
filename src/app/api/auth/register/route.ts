@@ -3,8 +3,24 @@ import { cookies } from 'next/headers';
 
 import { prisma } from '@/lib/prisma';
 import { hashPassword, validateEmail, validatePassword } from '@/lib/auth';
+import { sanitizeTimezone } from '@/lib/user-settings';
+import { getClientIp, rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const { allowed, remaining, resetAt } = rateLimit(`register:${ip}`, 5, 60_000); // 5 registros/min
+  if (!allowed) {
+    return NextResponse.json(
+      { message: 'Demasiados intentos. Espera un momento e inténtalo de nuevo.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil((resetAt.getTime() - Date.now()) / 1000)),
+          'X-RateLimit-Remaining': String(remaining),
+        },
+      },
+    );
+  }
   const body = await request.json().catch(() => null);
 
   if (!body || typeof body !== 'object') {
@@ -14,6 +30,8 @@ export async function POST(request: Request) {
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const password = typeof body.password === 'string' ? body.password : '';
+  const rawTimezone = typeof body.timezone === 'string' ? body.timezone : null;
+  const timezone = rawTimezone ? sanitizeTimezone(rawTimezone, 'America/Mexico_City') : 'America/Mexico_City';
 
   if (!validateEmail(email)) {
     return NextResponse.json({ message: 'El correo debe contener un @.' }, { status: 400 });
@@ -39,6 +57,9 @@ export async function POST(request: Request) {
           name: 'Calendario principal',
           color: '#6366F1',
         },
+      },
+      settings: {
+        create: { timezone },
       },
     },
     include: {

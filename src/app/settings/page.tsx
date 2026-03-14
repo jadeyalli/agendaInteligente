@@ -1,75 +1,15 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
-
-import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
-import {
-  DEFAULT_USER_SETTINGS,
-  mergeUserSettings,
-  parseEnabledDaysField,
-  type AvailabilitySlotInput,
-  type UserSettingsValues,
-} from '@/lib/user-settings';
 
-import SettingsForm from './SettingsForm';
-
-async function loadUserSettings(userId: string): Promise<{ settings: UserSettingsValues; slots: AvailabilitySlotInput[] }> {
-  const [record, slotRecords] = await Promise.all([
-    prisma.userSettings.findUnique({ where: { userId } }),
-    prisma.availabilitySlot.findMany({ where: { userId } }),
-  ]);
-
-  const settings = record
-    ? mergeUserSettings({
-        dayStart: record.dayStart,
-        dayEnd: record.dayEnd,
-        enabledDays: parseEnabledDaysField(record.enabledDays),
-        eventBufferMinutes: record.eventBufferMinutes,
-        schedulingLeadMinutes: record.schedulingLeadMinutes,
-        timezone: record.timezone,
-        weightStability: record.weightStability,
-        weightUrgency: record.weightUrgency,
-        weightWorkHours: record.weightWorkHours,
-        weightCrossDay: record.weightCrossDay,
-      })
-    : { ...DEFAULT_USER_SETTINGS };
-
-  const slots: AvailabilitySlotInput[] = slotRecords.map((s) => ({
-    dayOfWeek: s.dayOfWeek,
-    startTime: s.startTime,
-    endTime: s.endTime,
-  }));
-
-  return { settings, slots };
-}
-
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ first?: string }>;
+}) {
   const user = await getSessionUser();
-  if (!user) {
-    redirect('/login');
-  }
+  if (!user) redirect('/login');
 
-  const { settings, slots } = await loadUserSettings(user.id);
-
-  return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
-      <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-12 sm:py-16">
-        <div className="space-y-2">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center gap-2 text-sm text-indigo-500 transition hover:text-indigo-600"
-          >
-            ← Volver al panel
-          </Link>
-          <h1 className="text-2xl font-semibold text-[var(--fg)] sm:text-3xl">Configuración personal</h1>
-          <p className="max-w-2xl text-sm text-[var(--muted)]">
-            Personaliza los horarios y reglas que la Agenda Inteligente utilizará para mostrar tu
-            calendario y sugerir nuevos eventos.
-          </p>
-        </div>
-
-        <SettingsForm initialValues={settings} initialSlots={slots} />
-      </main>
-    </div>
-  );
+  const params = await searchParams;
+  const suffix = params.first === '1' ? '?first=1' : '';
+  redirect(`/profile${suffix}`);
 }
