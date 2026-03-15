@@ -1,0 +1,44 @@
+{
+  "user": {
+    "timezone": "America/Mexico_City"
+  },
+  "horizon": {
+    "start": "2026-10-05T00:00:00",
+    "end": "2026-10-12T00:00:00",
+    "slotMinutes": 5
+  },
+  "config": {
+    "bufferMinutes": 5,
+    "leadMinutes": 0,
+    "dayStart": "08:00",
+    "dayEnd": "18:00",
+    "activeDays": [0, 1, 2, 3, 4],
+    "stability": "flexible",
+    "categories": [
+      {"name": "Trabajo", "rank": 1}
+    ]
+  },
+  "availability": {
+    "preferred": [],
+    "fallbackUsed": true
+  },
+  "events": {
+    "fixed": [
+      {
+        "id": "critical-1",
+        "start": "2026-10-05T09:00:00",
+        "end": "2026-10-05T11:00:00",
+        "blocksCapacity": true
+      },
+      {
+        "id": "critical-2",
+        "start": "2026-10-05T10:00:00",
+        "end": "2026-10-05T12:00:00",
+        "blocksCapacity": true
+      }
+    ],
+    "movable": [],
+    "new": [],
+    "newFixed": []
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "user": {
+    "timezone": "America/Mexico_City"
+  },
+  "horizon": {
+    "start": "2026-10-05T00:00:00",
+    "end": "2026-10-12T00:00:00",
+    "slotMinutes": 5
+  },
+  "config": {
+    "bufferMinutes": 5,
+    "leadMinutes": 0,
+    "dayStart": "08:00",
+    "dayEnd": "18:00",
+    "activeDays": [0, 1, 2, 3, 4],
+    "stability": "flexible",
+    "categories": [
+      {"name": "Trabajo", "rank": 1},
+      {"name": "Personal", "rank": 2}
+    ]
+  },
+  "availability": {
+    "preferred": [],
+    "fallbackUsed": true
+  },
+  "events": {
+    "fixed": [
+      {
+        "id": "fixed-1",
+        "start": "2026-10-05T09:00:00",
+        "end": "2026-10-05T11:00:00",
+        "blocksCapacity": true
+      }
+    ],
+    "movable": [],
+    "new": [
+      {
+        "id": "flex-urgent-1",
+        "priority": "UnI",
+        "durationMin": 60,
+        "canOverlap": false,
+        "window": "PRONTO",
+        "categoryRank": 1
+      },
+      {
+        "id": "flex-relevant-1",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "SEMANA",
+        "categoryRank": 2
+      }
+    ],
+    "newFixed": []
+  }
+}

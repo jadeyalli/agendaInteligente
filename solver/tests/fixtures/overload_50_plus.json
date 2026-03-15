@@ -1,0 +1,634 @@
+{
+  "user": {
+    "timezone": "America/Mexico_City"
+  },
+  "horizon": {
+    "start": "2026-10-05T00:00:00",
+    "end": "2026-11-05T00:00:00",
+    "slotMinutes": 5
+  },
+  "config": {
+    "bufferMinutes": 5,
+    "leadMinutes": 0,
+    "dayStart": "08:00",
+    "dayEnd": "18:00",
+    "activeDays": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "stability": "balanced",
+    "categories": [
+      {
+        "name": "Trabajo",
+        "rank": 1
+      },
+      {
+        "name": "Personal",
+        "rank": 2
+      },
+      {
+        "name": "Salud",
+        "rank": 3
+      }
+    ]
+  },
+  "availability": {
+    "preferred": [],
+    "fallbackUsed": true
+  },
+  "events": {
+    "fixed": [],
+    "movable": [
+      {
+        "id": "urgent-1",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-06T09:00:00"
+      },
+      {
+        "id": "urgent-2",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-07T10:00:00"
+      },
+      {
+        "id": "urgent-3",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-08T11:00:00"
+      },
+      {
+        "id": "urgent-4",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-09T12:00:00"
+      },
+      {
+        "id": "urgent-5",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-10T13:00:00"
+      },
+      {
+        "id": "urgent-6",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-11T14:00:00"
+      },
+      {
+        "id": "urgent-7",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-12T15:00:00"
+      },
+      {
+        "id": "urgent-8",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-13T08:00:00"
+      },
+      {
+        "id": "urgent-9",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-14T09:00:00"
+      },
+      {
+        "id": "urgent-10",
+        "priority": "UnI",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-15T10:00:00"
+      },
+      {
+        "id": "relevant-1",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-06T09:00:00"
+      },
+      {
+        "id": "relevant-2",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-07T10:00:00"
+      },
+      {
+        "id": "relevant-3",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-08T11:00:00"
+      },
+      {
+        "id": "relevant-4",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-09T12:00:00"
+      },
+      {
+        "id": "relevant-5",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-10T13:00:00"
+      },
+      {
+        "id": "relevant-6",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-11T14:00:00"
+      },
+      {
+        "id": "relevant-7",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-12T15:00:00"
+      },
+      {
+        "id": "relevant-8",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-13T08:00:00"
+      },
+      {
+        "id": "relevant-9",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-14T09:00:00"
+      },
+      {
+        "id": "relevant-10",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-15T10:00:00"
+      },
+      {
+        "id": "relevant-11",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-16T11:00:00"
+      },
+      {
+        "id": "relevant-12",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-17T12:00:00"
+      },
+      {
+        "id": "relevant-13",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-18T13:00:00"
+      },
+      {
+        "id": "relevant-14",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-19T14:00:00"
+      },
+      {
+        "id": "relevant-15",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-20T15:00:00"
+      },
+      {
+        "id": "relevant-16",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-21T08:00:00"
+      },
+      {
+        "id": "relevant-17",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-22T09:00:00"
+      },
+      {
+        "id": "relevant-18",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-23T10:00:00"
+      },
+      {
+        "id": "relevant-19",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-24T11:00:00"
+      },
+      {
+        "id": "relevant-20",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-25T12:00:00"
+      },
+      {
+        "id": "relevant-21",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-26T13:00:00"
+      },
+      {
+        "id": "relevant-22",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-27T14:00:00"
+      },
+      {
+        "id": "relevant-23",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-28T15:00:00"
+      },
+      {
+        "id": "relevant-24",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-29T08:00:00"
+      },
+      {
+        "id": "relevant-25",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-05T09:00:00"
+      },
+      {
+        "id": "relevant-26",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-06T10:00:00"
+      },
+      {
+        "id": "relevant-27",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-07T11:00:00"
+      },
+      {
+        "id": "relevant-28",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-08T12:00:00"
+      },
+      {
+        "id": "relevant-29",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-09T13:00:00"
+      },
+      {
+        "id": "relevant-30",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-10T14:00:00"
+      },
+      {
+        "id": "relevant-31",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-11T15:00:00"
+      },
+      {
+        "id": "relevant-32",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-12T08:00:00"
+      },
+      {
+        "id": "relevant-33",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-13T09:00:00"
+      },
+      {
+        "id": "relevant-34",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-14T10:00:00"
+      },
+      {
+        "id": "relevant-35",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-15T11:00:00"
+      },
+      {
+        "id": "relevant-36",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-16T12:00:00"
+      },
+      {
+        "id": "relevant-37",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-17T13:00:00"
+      },
+      {
+        "id": "relevant-38",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-18T14:00:00"
+      },
+      {
+        "id": "relevant-39",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-19T15:00:00"
+      },
+      {
+        "id": "relevant-40",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-20T08:00:00"
+      },
+      {
+        "id": "relevant-41",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-21T09:00:00"
+      },
+      {
+        "id": "relevant-42",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-22T10:00:00"
+      },
+      {
+        "id": "relevant-43",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-23T11:00:00"
+      },
+      {
+        "id": "relevant-44",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-24T12:00:00"
+      },
+      {
+        "id": "relevant-45",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-25T13:00:00"
+      },
+      {
+        "id": "relevant-46",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-26T14:00:00"
+      },
+      {
+        "id": "relevant-47",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-27T15:00:00"
+      },
+      {
+        "id": "relevant-48",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-28T08:00:00"
+      },
+      {
+        "id": "relevant-49",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-29T09:00:00"
+      },
+      {
+        "id": "relevant-50",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-05T10:00:00"
+      },
+      {
+        "id": "relevant-51",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-06T11:00:00"
+      },
+      {
+        "id": "relevant-52",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-07T12:00:00"
+      },
+      {
+        "id": "relevant-53",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 3,
+        "currentStart": "2026-10-08T13:00:00"
+      },
+      {
+        "id": "relevant-54",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 1,
+        "currentStart": "2026-10-09T14:00:00"
+      },
+      {
+        "id": "relevant-55",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "NONE",
+        "categoryRank": 2,
+        "currentStart": "2026-10-10T15:00:00"
+      }
+    ],
+    "new": [],
+    "newFixed": []
+  }
+}

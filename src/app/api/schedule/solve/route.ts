@@ -7,7 +7,6 @@ import {
   DEFAULT_USER_SETTINGS,
   JS_DAY_TO_DAY_CODE,
   dayCodesToWeekdayIndexes,
-  levelsToWeights,
   mergeUserSettings,
   parseEnabledDaysField,
   timeStringToParts,
@@ -30,8 +29,15 @@ interface SolvePayload {
     new: unknown[];
     newFixed: unknown[];
   };
-  weights: Record<string, Record<string, number>>;
-  policy: Record<string, unknown>;
+  config: {
+    stability: 'flexible' | 'balanced' | 'fixed';
+    categories: { name: string; rank: number }[];
+    bufferMinutes: number;
+    leadMinutes: number;
+    dayStart: string;
+    dayEnd: string;
+    activeDays: number[];
+  };
 }
 
 // ———————————— Utils de tiempo ————————————
@@ -94,12 +100,11 @@ export type SolverOutput = z.infer<typeof SolverOutputSchema>;
 // ———————————— Llamada al solver (python) ————————————
 async function runSolver(input: SolvePayload) {
   const pythonBin = process.env.PYTHON_BIN || 'python'; // setea PYTHON_BIN si usas otro
-  const script = process.cwd() + '/solver.py';
 
   const TIMEOUT_MS = 30_000; // 30 segundos máximo
 
   return new Promise<unknown>((resolve, reject) => {
-    const child = spawn(pythonBin, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(pythonBin, ['-m', 'solver'], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     let settled = false;
@@ -239,13 +244,32 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
     orderBy: [{ start: 'asc' }, { createdAt: 'asc' }],
   });
 
+  // Build category rank map from event categories (alphabetical order)
+  const categorySet = new Set<string>();
+  for (const r of events) {
+    if (r.category) categorySet.add(r.category);
+  }
+  const sortedCategories = Array.from(categorySet).sort();
+  const categoryRankMap = new Map<string, number>(
+    sortedCategories.map((name, i) => [name, i + 1]),
+  );
+  const categoriesConfig = sortedCategories.map((name, i) => ({ name, rank: i + 1 }));
+
+  const stabilityMap: Record<1 | 2 | 3, 'flexible' | 'balanced' | 'fixed'> = {
+    1: 'flexible',
+    2: 'balanced',
+    3: 'fixed',
+  };
+  const stability = stabilityMap[settings.weightStability];
+
   const fixed: unknown[] = [];
   const movable: unknown[] = [];
 
   for (const r of events) {
     const prio = mapPriorityToEisen(r.priority);
-    const blocksCapacity = !!(r.isInPerson && !r.canOverlap);
+    const blocksCapacity = !r.canOverlap;
     const durationMin = r.durationMinutes ?? minutesBetween(r.start ?? null, r.end ?? null) ?? 30;
+    const categoryRank = r.category ? (categoryRankMap.get(r.category) ?? 1) : 1;
 
     // UI (Crítica) y/o eventos fijos ya con hora se pasan como "fixed"
     if (prio === 'UI' && r.start && r.end) {
@@ -253,8 +277,6 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
         id: r.id,
         start: toLocalISO(new Date(r.start), tz),
         end: toLocalISO(new Date(r.end), tz),
-        isInPerson: r.isInPerson,
-        canOverlap: r.canOverlap,
         blocksCapacity,
       });
       continue;
@@ -269,12 +291,12 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
         id: r.id,
         priority: prio,
         durationMin,
-        isInPerson: r.isInPerson,
         canOverlap: r.canOverlap,
         currentStart,
         window,
         windowStart: r.windowStart ? toLocalISO(new Date(r.windowStart), tz) : null,
         windowEnd: r.windowEnd ? toLocalISO(new Date(r.windowEnd), tz) : null,
+        categoryRank,
       });
     }
   }
@@ -289,7 +311,7 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
     horizon: {
       start: toLocalISO(horizonStart, tz),
       end: toLocalISO(horizonEnd, tz),
-      slotMinutes: 30,
+      slotMinutes: 5,
     },
     availability: {
       preferred: preferredRanges,
@@ -301,17 +323,14 @@ async function buildPayloadForUser(userId: string, extraNew?: unknown[]) {
       new: extraNew ?? [],
       newFixed: [],
     },
-    weights: levelsToWeights(settings),
-    policy: {
-      allowWeekend: activeDays.some((d) => d >= 5),
-      noOverlapCapacity: 1,
-      remoteCapacity: 9999,
+    config: {
+      stability,
+      categories: categoriesConfig,
+      bufferMinutes: settings.eventBufferMinutes,
+      leadMinutes: settings.schedulingLeadMinutes,
       dayStart: settings.dayStart,
       dayEnd: settings.dayEnd,
       activeDays,
-      eventBufferMinutes: settings.eventBufferMinutes,
-      schedulingLeadMinutes: settings.schedulingLeadMinutes,
-      perDaySlots: Object.fromEntries(perDaySlots),
     },
   };
 

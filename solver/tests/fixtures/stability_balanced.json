@@ -1,0 +1,52 @@
+{
+  "user": {
+    "timezone": "America/Mexico_City"
+  },
+  "horizon": {
+    "start": "2026-10-05T00:00:00",
+    "end": "2026-10-12T00:00:00",
+    "slotMinutes": 5
+  },
+  "config": {
+    "bufferMinutes": 5,
+    "leadMinutes": 0,
+    "dayStart": "08:00",
+    "dayEnd": "18:00",
+    "activeDays": [0, 1, 2, 3, 4],
+    "stability": "balanced",
+    "categories": [
+      {"name": "Trabajo", "rank": 1},
+      {"name": "Personal", "rank": 2},
+      {"name": "Escuela", "rank": 3}
+    ]
+  },
+  "availability": {
+    "preferred": [],
+    "fallbackUsed": true
+  },
+  "events": {
+    "fixed": [],
+    "movable": [
+      {
+        "id": "mov-urg-trabajo",
+        "priority": "UnI",
+        "durationMin": 60,
+        "canOverlap": false,
+        "window": "SEMANA",
+        "categoryRank": 1,
+        "currentStart": "2026-10-05T09:00:00"
+      },
+      {
+        "id": "mov-urg-escuela",
+        "priority": "UnI",
+        "durationMin": 60,
+        "canOverlap": false,
+        "window": "SEMANA",
+        "categoryRank": 3,
+        "currentStart": "2026-10-05T09:00:00"
+      }
+    ],
+    "new": [],
+    "newFixed": []
+  }
+}

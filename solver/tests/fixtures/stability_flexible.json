@@ -1,0 +1,70 @@
+{
+  "user": {
+    "timezone": "America/Mexico_City"
+  },
+  "horizon": {
+    "start": "2026-10-05T00:00:00",
+    "end": "2026-10-12T00:00:00",
+    "slotMinutes": 5
+  },
+  "config": {
+    "bufferMinutes": 5,
+    "leadMinutes": 0,
+    "dayStart": "08:00",
+    "dayEnd": "18:00",
+    "activeDays": [0, 1, 2, 3, 4],
+    "stability": "flexible",
+    "categories": [
+      {"name": "Trabajo", "rank": 1},
+      {"name": "Personal", "rank": 2},
+      {"name": "Salud", "rank": 3}
+    ]
+  },
+  "availability": {
+    "preferred": [],
+    "fallbackUsed": true
+  },
+  "events": {
+    "fixed": [],
+    "movable": [
+      {
+        "id": "mov-rel-1",
+        "priority": "InU",
+        "durationMin": 60,
+        "canOverlap": false,
+        "window": "SEMANA",
+        "categoryRank": 1,
+        "currentStart": "2026-10-06T09:00:00"
+      },
+      {
+        "id": "mov-rel-2",
+        "priority": "InU",
+        "durationMin": 30,
+        "canOverlap": false,
+        "window": "SEMANA",
+        "categoryRank": 2,
+        "currentStart": "2026-10-06T10:00:00"
+      },
+      {
+        "id": "mov-rel-3",
+        "priority": "InU",
+        "durationMin": 45,
+        "canOverlap": false,
+        "window": "SEMANA",
+        "categoryRank": 3,
+        "currentStart": "2026-10-07T14:00:00"
+      }
+    ],
+    "new": [
+      {
+        "id": "new-urgent-1",
+        "priority": "UnI",
+        "durationMin": 60,
+        "canOverlap": false,
+        "window": "PRONTO",
+        "categoryRank": 1
+      }
+    ],
+    "newFixed": []
+  }
+}
