@@ -25,7 +25,20 @@
       "Bash(find /c/Users/jadey/proyecto-final/agenda-inteligente/src -type f -name *.ts -o -name *.tsx)",
       "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
       "Bash(grep -E '\\(^[^/]*\\\\.py$|src/|solver/\\)')",
-      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"sí, continua\" npx prisma migrate reset --force --skip-seed)"
+      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"sí, continua\" npx prisma migrate reset --force --skip-seed)",
+      "Bash(npx tsx:*)",
+      "Bash(node -e \":*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(python -m pytest solver/tests/ -q)",
+      "Bash(ls /c/Users/jadey/proyecto-final/agenda-inteligente/solver*.py)",
+      "Bash(cp caso1.json solver/tests/fixtures/caso1.json)",
+      "Bash(cp caso_buffer.json solver/tests/fixtures/caso_buffer.json)",
+      "Bash(cp caso_large.json solver/tests/fixtures/caso_large.json)",
+      "Bash(cp caso_preferred.json solver/tests/fixtures/caso_preferred.json)",
+      "Bash(cp input.json solver/tests/fixtures/caso_input_legacy.json)",
+      "Bash(python -m pytest solver/tests/ -v --tb=short -q)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
