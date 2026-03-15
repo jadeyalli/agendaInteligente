@@ -5,7 +5,18 @@
       "Bash(npm install:*)",
       "Bash(npx vitest:*)",
       "Bash(npx prisma:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(python -m solver caso1.json)",
+      "Bash(python solver.py caso1.json)",
+      "Bash(python -c \"from solver.models import SolverConfig, FlexibleEvent, SolverResult, Horizon, build_horizon, EventPriority, StabilityMode, WindowType, FixedEvent, CandidateCost; print\\(''OK — todos los imports funcionan''\\)\")",
+      "Bash(python -m solver caso_buffer.json)",
+      "Bash(python -m solver caso_preferred.json)",
+      "Bash(python -m solver caso_large.json)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Bash(python -m solver $f)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f''''OK - {d[\"\"diagnostics\"\"][\"\"summary\"\"]}''''\\)\")",
+      "Bash(done)"
     ]
   }
 }
