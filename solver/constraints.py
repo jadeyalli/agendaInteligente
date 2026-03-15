@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple
 
 from ortools.sat.python import cp_model
 
-from .models import CandidateCost, FixedEvent, FlexibleEvent
+from .models import CandidateCost, EventPriority, FixedEvent, FlexibleEvent
 
 
 def add_exactly_one_constraints(
@@ -155,10 +155,19 @@ def build_objective(
         candidates: Diccionario event_id → lista de slots candidatos.
     """
     obj_terms = []
+    prio_weights = {EventPriority.URGENT: 3, EventPriority.RELEVANT: 1}
     for ev in flex_events:
+        pw = prio_weights.get(ev.priority, 1)
         for s in candidates.get(ev.id, []):
             c = costs[(ev.id, s)].total
             if c != 0:
                 obj_terms.append(c * x_vars[(ev.id, s)])
+            else:
+                # Tie-breaker when primary cost is 0 (new events or flexible mode):
+                # prefer placing higher-priority events at earlier slots.
+                # URGENT (pw=3) gets 3× more pressure toward early slots than RELEVANT (pw=1).
+                pos_term = pw * s
+                if pos_term != 0:
+                    obj_terms.append(pos_term * x_vars[(ev.id, s)])
 
     model.Minimize(sum(obj_terms) if obj_terms else 0)
