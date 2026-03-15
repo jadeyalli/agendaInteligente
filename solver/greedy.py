@@ -5,7 +5,7 @@ Garantiza respuesta siempre, aunque subóptima.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 from .candidates import generate_candidates
 from .models import (
@@ -121,9 +121,10 @@ def greedy_schedule(
     )
 
 
-def _sort_key(config: SolverConfig):
+def _sort_key(config: SolverConfig) -> Callable[[FlexibleEvent], Tuple[int, int]]:
     """Retorna función de ordenamiento: priority_weight DESC, cat_weight DESC."""
     def key(ev: FlexibleEvent) -> Tuple[int, int]:
+        """Retorna (−priority_weight, −cat_weight) para ordenar DESC."""
         priority_weight = _PRIORITY_WEIGHT[ev.priority]
         cat_weight = config.total_categories - ev.category_rank + 1
         return (-priority_weight, -cat_weight)

@@ -5,7 +5,7 @@ Cada función es pura: recibe datos, retorna datos. Sin estado mutable externo.
 from __future__ import annotations
 
 import math
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 
 from .models import (
@@ -215,6 +215,7 @@ def filter_by_preference(
         Lista filtrada según el nivel de preferencia más alto disponible.
     """
     def all_in_set(s: int, slot_set: Set[int]) -> bool:
+        """Retorna True si todos los slots del evento están en slot_set."""
         return all(t in slot_set for t in range(s, s + duration_slots))
 
     if preferred_slots:
@@ -376,7 +377,7 @@ def generate_candidates(
 # Helpers internos
 # ---------------------------------------------------------------------------
 
-def _day_index(dt) -> Tuple[int, int, int]:
+def _day_index(dt: datetime) -> Tuple[int, int, int]:
     """Retorna (año, mes, día) para detectar cambio de día."""
     dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     return (dt.year, dt.month, dt.day)
