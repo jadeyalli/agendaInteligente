@@ -10,11 +10,11 @@ import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
 import { CalendarX2, Download } from 'lucide-react';
-import Link from 'next/link';
 
 import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
+import OptionalEventsPanel from '@/components/OptionalEventsPanel';
 import { useToast } from '@/components/ui/ToastProvider';
 
 import { THEMES, currentTheme } from '@/theme/themes';
@@ -118,6 +118,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [openImport, setOpenImport] = useState(false);
+  const [openOptionalPanel, setOpenOptionalPanel] = useState(false);
 
   // Vista previa
   const [openPreview, setOpenPreview] = useState(false);
@@ -240,6 +241,11 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }, [disabledWeekdayIndexes]);
 
   const waitlistGroups = useMemo(() => buildWaitlistGroups(rows), [rows]);
+
+  const optionalEvents = useMemo(
+    () => rows.filter((r) => r.priority === 'OPCIONAL'),
+    [rows],
+  );
 
   const waitlistTotal = useMemo(
     () => waitlistGroups.reduce((sum, group) => sum + group.events.length, 0),
@@ -409,6 +415,13 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setCreating(false);
     }
   }
+
+  const handleScheduleFromOptional = (eventId: string) => {
+    const event = rows.find((r) => r.id === eventId);
+    if (!event) return;
+    setOpenOptionalPanel(false);
+    handleScheduleFromWaitlist(event);
+  };
 
   const handleScheduleFromWaitlist = (event: EventRow) => {
     waitlistPromoteRef.current = event;
@@ -1023,12 +1036,13 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                   );
                 })}
                 {waitlistTotal > 4 && (
-                  <Link
-                    href="/dashboard/waitlist"
+                  <button
+                    type="button"
+                    onClick={() => setOpenOptionalPanel(true)}
                     className="flex w-full items-center justify-center gap-1 rounded-2xl border border-slate-200/70 py-2.5 text-xs font-medium text-[var(--muted)] transition hover:border-slate-300 hover:text-[var(--fg)]"
                   >
                     Ver todos ({waitlistTotal}) →
-                  </Link>
+                  </button>
                 )}
               </div>
             )}
@@ -1069,6 +1083,14 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
         open={openImport}
         onClose={() => setOpenImport(false)}
         onImported={async () => { await loadEvents(); }}
+      />
+
+      {/* Panel de eventos opcionales */}
+      <OptionalEventsPanel
+        events={optionalEvents}
+        onScheduleEvent={handleScheduleFromOptional}
+        isOpen={openOptionalPanel}
+        onToggle={() => setOpenOptionalPanel((v) => !v)}
       />
 
       {/* Vista previa */}

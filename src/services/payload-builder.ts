@@ -13,6 +13,7 @@ import {
   type DayCode,
   type UserSettingsValues,
 } from '@/lib/user-settings';
+import { collaborativeRepository } from '@/repositories/collaborative.repo';
 import { eventRepository } from '@/repositories/events.repo';
 import { settingsRepository } from '@/repositories/settings.repo';
 
@@ -184,10 +185,11 @@ export async function buildSolverPayload(
   const horizonStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const horizonEnd = endOfMonth(now);
 
-  const [rawSettings, slotRecords, events] = await Promise.all([
+  const [rawSettings, slotRecords, events, phantomBlocks] = await Promise.all([
     settingsRepository.findByUserId(userId),
     settingsRepository.findAvailabilitySlots(userId),
     eventRepository.findByUserId(userId),
+    collaborativeRepository.findActivePhantomBlocks(userId),
   ]);
 
   const tz = rawSettings?.timezone ?? DEFAULT_USER_SETTINGS.timezone;
@@ -287,6 +289,17 @@ export async function buildSolverPayload(
         categoryRank,
       });
     }
+  }
+
+  // Bloques fantasma activos → tratados como eventos fijos que bloquean capacidad.
+  // El solver no sabe que son fantasma: solo ve un bloque ocupado (restricción R7).
+  for (const phantom of phantomBlocks) {
+    fixed.push({
+      id: `phantom_${phantom.id}`,
+      start: toLocalISO(phantom.start, tz),
+      end: toLocalISO(phantom.end, tz),
+      blocksCapacity: true,
+    });
   }
 
   const preferredRanges = generatePreferredRanges(

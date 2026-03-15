@@ -4,7 +4,7 @@
  */
 import { prisma } from '@/lib/prisma';
 
-import type { Event } from '@prisma/client';
+import type { Event, Priority } from '@prisma/client';
 
 export class EventRepository {
   /**
@@ -67,6 +67,67 @@ export class EventRepository {
         }),
       ),
     );
+  }
+
+  /**
+   * Crea un evento nuevo en la agenda de un usuario.
+   * Usado por el módulo colaborativo al confirmar o aceptar un horario.
+   */
+  async create(data: {
+    userId: string;
+    title: string;
+    description?: string | null;
+    priority: string;
+    start: Date;
+    end: Date;
+    isFixed?: boolean;
+    canOverlap?: boolean;
+    durationMinutes: number;
+  }): Promise<Event> {
+    return prisma.event.create({
+      data: {
+        userId: data.userId,
+        title: data.title,
+        description: data.description,
+        priority: data.priority as Priority,
+        start: data.start,
+        end: data.end,
+        isFixed: data.isFixed ?? false,
+        canOverlap: data.canOverlap ?? false,
+        durationMinutes: data.durationMinutes,
+        status: 'SCHEDULED',
+      },
+    });
+  }
+
+  /**
+   * Convierte un evento en recordatorio (para cancelaciones colaborativas).
+   * Elimina isFixed y establece canOverlap = true para que se solape sin afectar agenda.
+   */
+  async convertToReminder(eventId: string): Promise<void> {
+    await prisma.event.update({
+      where: { id: eventId },
+      data: { priority: 'RECORDATORIO', isFixed: false, canOverlap: true },
+    });
+  }
+
+  /**
+   * Actualiza el campo isFixed de un evento.
+   * Usado al aprobar reagendamiento colaborativo para desfijir temporalmente.
+   */
+  async updateFixed(eventId: string, isFixed: boolean): Promise<void> {
+    await prisma.event.update({
+      where: { id: eventId },
+      data: { isFixed },
+    });
+  }
+
+  /**
+   * Elimina un evento por ID.
+   * Usado cuando un invitado sale de un evento colaborativo que ya había aceptado.
+   */
+  async delete(eventId: string): Promise<void> {
+    await prisma.event.delete({ where: { id: eventId } });
   }
 }
 
