@@ -14,7 +14,7 @@ generator client {
 }
 
 // =====================
-// Enums
+// Enums — Core
 // =====================
 enum Priority {
   CRITICA
@@ -77,17 +77,51 @@ enum ICalTodoStatus {
 }
 
 // =====================
-// Modelos
+// Enums — Colaborativos
+// =====================
+enum CollabStatus {
+  DRAFT
+  VOTING
+  CONFIRMED
+  RENEGOTIATING
+  CANCELLED
+}
+
+enum CollabRole {
+  HOST
+  ESSENTIAL
+  REGULAR
+}
+
+enum ParticipantStatus {
+  PENDING
+  VOTED
+  ACCEPTED
+  DECLINED
+  LEFT
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// =====================
+// Modelos — Core
 // =====================
 model User {
-  id        String             @id @default(cuid())
-  email     String             @unique
-  password  String
-  name      String?
-  events    Event[]
-  slots     AvailabilitySlot[]
-  calendars Calendar[]
-  settings  UserSettings?
+  id       String    @id @default(cuid())
+  email    String    @unique
+  password String
+  name     String?
+
+  // Relación 1:1 con Calendar (un solo calendario por usuario)
+  calendar Calendar?
+
+  events   Event[]
+  slots    AvailabilitySlot[]
+  settings UserSettings?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -95,7 +129,8 @@ model User {
 
 model Calendar {
   id     String @id @default(cuid())
-  userId String
+  // @unique garantiza la relación 1:1 con User
+  userId String @unique
   user   User   @relation(fields: [userId], references: [id])
 
   name     String
@@ -107,8 +142,6 @@ model Calendar {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@index([userId])
 }
 
 model CalendarSource {
@@ -181,14 +214,41 @@ model Event {
   windowStart DateTime?
   windowEnd   DateTime?
 
-  // Identidad / sync iCal
-  uid          String?
-  sequence     Int       @default(0)
-  etag         String?
+  // Estado interno
+  isFixed Boolean @default(false)
+  status  String  @default("SCHEDULED")
+
+  // Metadatos iCal separados (relación 1:1 opcional)
+  icalMeta EventICalMeta?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, start])
+  @@index([calendarId, start])
+  @@index([status])
+  @@index([participatesInScheduling])
+}
+
+/// Metadatos de sincronización iCal separados del núcleo del evento.
+/// Solo existe para eventos importados desde iCal o creados con campos iCal explícitos.
+model EventICalMeta {
+  id      String @id @default(cuid())
+  eventId String @unique
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  // Almacenado para la restricción @@unique de sincronización iCal
+  calendarId String?
+
+  // Identidad iCal
+  uid         String?
+  sequence    Int     @default(0)
+  etag        String?
   lastModified DateTime?
   createdIcal  DateTime?
 
-  // Localización / estado iCal (VEVENT)
+  // Localización / estado iCal
   location     String?
   statusIcal   ICalStatus?
   transparency ICalTransparency?
@@ -197,22 +257,11 @@ model Event {
   organizer String?
   attendees Json?
 
-  // Estado interno
-  isFixed Boolean @default(false)
-  status  String  @default("SCHEDULED")
-
-  // VEVENT/VTODO original (opcional para auditoría)
+  // VEVENT/VTODO original (para auditoría)
   icsRaw String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  // Índice compuesto para deduplicación en sync iCal
   @@unique([calendarId, uid])
-  @@index([userId])
-  @@index([userId, start])
-  @@index([calendarId, start])
-  @@index([status])
-  @@index([participatesInScheduling])
 }
 
 model AvailabilitySlot {
@@ -232,18 +281,112 @@ model UserSettings {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
 
-  dayStart String @default("09:00")
-  dayEnd   String @default("18:00")
+  dayStart    String @default("09:00")
+  dayEnd      String @default("18:00")
   enabledDays String @default("[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\"]")
-  eventBufferMinutes     Int @default(0)
-  schedulingLeadMinutes  Int @default(0)
-  timezone               String @default("America/Mexico_City")
-  weightStability        Int @default(2)
-  weightUrgency          Int @default(2)
-  weightWorkHours        Int @default(2)
-  weightCrossDay         Int @default(2)
-  categories             String @default("[\"Escuela\",\"Trabajo\",\"Personal\",\"Familia\",\"Salud\"]")
+
+  eventBufferMinutes    Int @default(0)
+  schedulingLeadMinutes Int @default(0)
+  timezone              String @default("America/Mexico_City")
+  weightStability       Int @default(2)
+  weightUrgency         Int @default(2)
+  weightWorkHours       Int @default(2)
+  weightCrossDay        Int @default(2)
+  categories            String @default("[\"Escuela\",\"Trabajo\",\"Personal\",\"Familia\",\"Salud\"]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// =====================
+// Modelos — Colaborativos
+// =====================
+
+/// Evento colaborativo multiusuario con flujo de votación y confirmación.
+model CollaborativeEvent {
+  id          String      @id @default(cuid())
+  hostUserId  String
+  title       String
+  description String?
+  durationMin Int
+  status      CollabStatus @default(DRAFT)
+
+  /// Slot confirmado (nulo hasta la fase de confirmación)
+  confirmedSlot DateTime?
+
+  /// Zona horaria canónica del anfitrión (referencia para traducción)
+  hostTimezone String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  slots        CollabSlotOption[]
+  participants CollabParticipant[]
+  requests     CollabRescheduleRequest[]
+}
+
+/// Opción de horario propuesta para un evento colaborativo.
+/// Los bloques fantasma de los slots no confirmados se eliminan al confirmar.
+model CollabSlotOption {
+  id             String @id @default(cuid())
+  collabEventId  String
+  collabEvent    CollaborativeEvent @relation(fields: [collabEventId], references: [id], onDelete: Cascade)
+
+  proposedBy     String
+  start          DateTime
+  end            DateTime
+
+  /// ID del PhantomBlock asociado en la agenda del anfitrión (null si no aplica)
+  phantomBlockId String?
+
+  votes       Int     @default(0)
+  isConfirmed Boolean @default(false)
+
+  /// Ronda de votación (1 = inicial, 2+ = renegociaciones)
+  round Int @default(1)
+}
+
+/// Participante en un evento colaborativo con su rol y estado de participación.
+model CollabParticipant {
+  id            String @id @default(cuid())
+  collabEventId String
+  collabEvent   CollaborativeEvent @relation(fields: [collabEventId], references: [id], onDelete: Cascade)
+
+  userId    String
+  role      CollabRole
+  status    ParticipantStatus @default(PENDING)
+
+  /// Slot por el que votó (null si aún no ha votado)
+  votedSlotId String?
+
+  /// ID del evento en la agenda personal del invitado (null hasta aceptar)
+  localEventId String?
+
+  /// Zona horaria del invitado para mostrar horarios en formato dual
+  timezone String
+}
+
+/// Solicitud de reagendamiento iniciada por un invitado indispensable.
+model CollabRescheduleRequest {
+  id            String @id @default(cuid())
+  collabEventId String
+  collabEvent   CollaborativeEvent @relation(fields: [collabEventId], references: [id], onDelete: Cascade)
+
+  requestedBy String
+  status      RequestStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+}
+
+/// Bloque temporal en la agenda del usuario que reserva capacidad durante la negociación.
+/// Actúa como evento fijo en el solver (restricción R7). Se elimina al confirmar o cancelar.
+model PhantomBlock {
+  id            String @id @default(cuid())
+  userId        String
+  collabEventId String
+  start         DateTime
+  end           DateTime
+  isActive      Boolean @default(true)
+
+  @@index([userId, isActive])
 }

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import ICAL from 'ical.js';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
   buildSchedulingContext,
@@ -7,7 +8,7 @@ import {
   preemptLowerPriorityEvents,
   scheduleFlexibleEvents,
 } from '@/lib/scheduling-engine';
-import type { Event as DbEvent } from '@prisma/client';
+import type { Event as DbEvent, ICalStatus, ICalTransparency } from '@prisma/client';
 
 type ImportMode = 'REMINDER' | 'SMART';
 
@@ -194,26 +195,43 @@ function expandOccurrences(comp: any, until: Date): Date[] {
     return dates;
 }
 
+/**
+ * Elimina todos los eventos de una serie iCal identificada por calendarId + uid.
+ * Busca a través del EventICalMeta para localizar el evento maestro.
+ */
 async function removeExistingSeries(calendarId: string, uid: string) {
-    const existing = await prisma.event.findFirst({
-        where: {
-            calendarId,
-            uid,
-        },
+    const existingMeta = await prisma.eventICalMeta.findUnique({
+        where: { calendarId_uid: { calendarId, uid } },
+        select: { eventId: true },
     });
 
-    if (!existing) {
+    if (!existingMeta) {
         return;
     }
 
     await prisma.event.deleteMany({
         where: {
             OR: [
-                { id: existing.id },
-                { originEventId: existing.id },
+                { id: existingMeta.eventId },
+                { originEventId: existingMeta.eventId },
             ],
         },
     });
+}
+
+/**
+ * Busca un evento existente por uid+calendarId a través de EventICalMeta.
+ * Retorna el evento si existe, null en caso contrario.
+ */
+async function findEventByICalUid(
+    calendarId: string,
+    uid: string,
+): Promise<{ id: string } | null> {
+    const meta = await prisma.eventICalMeta.findUnique({
+        where: { calendarId_uid: { calendarId, uid } },
+        select: { eventId: true },
+    });
+    return meta ? { id: meta.eventId } : null;
 }
 
 /**
@@ -255,7 +273,7 @@ export async function importIcsFromText(
         const summary = getText(comp.getFirstProperty('summary')) ?? '(Sin título)';
         const description = getText(comp.getFirstProperty('description')) ?? null;
         const location = getText(comp.getFirstProperty('location')) ?? null;
-        const statusIcal = (getText(comp.getFirstProperty('status')) as DbEvent['statusIcal']) ?? 'CONFIRMED';
+        const statusIcal = (getText(comp.getFirstProperty('status')) as ICalStatus) ?? 'CONFIRMED';
         const seqStr = getText(comp.getFirstProperty('sequence'));
         const sequence = seqStr ? Number(seqStr) : 0;
 
@@ -270,10 +288,6 @@ export async function importIcsFromText(
         const rrule = rruleString(comp);
         const repeat = inferRepeatFromRRULE(rrule);
 
-        const whereByUid = uid
-            ? { calendarId_uid: { calendarId: calendar.id, uid } as any }
-            : null;
-
         const durationMs = ensureDurationMs(start, end ?? null, isAllDay);
 
         if (mode === 'REMINDER' || (mode === 'SMART' && isAllDay)) {
@@ -281,27 +295,33 @@ export async function importIcsFromText(
             const reminderDurationMinutes = minutesDiff(allDayStart, allDayEnd);
             const reminderDurationMs = reminderDurationMinutes * 60 * 1000;
 
+            // Campos del núcleo del evento (sin metadatos iCal)
             const reminderBase = {
                 userId: user.id,
                 calendarId: calendar.id,
                 kind: 'EVENTO' as const,
                 title: summary,
                 description,
-                location,
                 tzid,
                 isAllDay: true,
-                transparency: 'TRANSPARENT' as DbEvent['transparency'],
                 participatesInScheduling: false,
                 isFixed: false,
                 priority: 'RECORDATORIO' as const,
-                statusIcal,
-                sequence,
                 category: 'AVISO',
                 status: 'SCHEDULED' as const,
                 window: 'NONE' as const,
                 windowStart: null,
                 windowEnd: null,
                 durationMinutes: reminderDurationMinutes,
+            };
+
+            // Metadatos iCal que van en EventICalMeta
+            const reminderICalMeta = {
+                calendarId: calendar.id,
+                location,
+                statusIcal,
+                sequence,
+                transparency: 'TRANSPARENT' as ICalTransparency,
             };
 
             const hasReminderRrule = !!rrule;
@@ -325,16 +345,20 @@ export async function importIcsFromText(
                     ? allDayBoundsFromDate(masterOcc, reminderDurationMs)
                     : { start: allDayStart, end: allDayEnd };
 
-                const masterData = {
-                    ...reminderBase,
-                    start: masterBounds.start,
-                    end: masterBounds.end,
-                    repeat: repeat as any,
-                    rrule: rrule ?? null,
-                    ...(uid ? { uid } : {}),
-                };
-
-                const master = await prisma.event.create({ data: masterData });
+                const master = await prisma.event.create({
+                    data: {
+                        ...reminderBase,
+                        start: masterBounds.start,
+                        end: masterBounds.end,
+                        repeat: repeat as any,
+                        rrule: rrule ?? null,
+                        ...(uid ? {
+                            icalMeta: {
+                                create: { ...reminderICalMeta, uid },
+                            },
+                        } : {}),
+                    },
+                });
                 importedIds.push(master.id);
 
                 const rest = ordered.slice(1);
@@ -358,23 +382,45 @@ export async function importIcsFromText(
                 continue;
             }
 
-            const reminderData = {
-                ...reminderBase,
-                start: allDayStart,
-                end: allDayEnd,
-                repeat: repeat as any,
-                rrule: rrule ?? null,
-            };
-
-            if (whereByUid) {
-                const saved = await prisma.event.upsert({
-                    where: whereByUid,
-                    update: reminderData,
-                    create: uid ? { ...reminderData, uid } : reminderData,
-                });
-                importedIds.push(saved.id);
+            // Evento sin recurrencia — upsert por uid vía EventICalMeta
+            if (uid) {
+                const existing = await findEventByICalUid(calendar.id, uid);
+                if (existing) {
+                    const saved = await prisma.event.update({
+                        where: { id: existing.id },
+                        data: {
+                            ...reminderBase,
+                            start: allDayStart,
+                            end: allDayEnd,
+                            repeat: repeat as any,
+                            rrule: rrule ?? null,
+                            icalMeta: { update: reminderICalMeta },
+                        },
+                    });
+                    importedIds.push(saved.id);
+                } else {
+                    const saved = await prisma.event.create({
+                        data: {
+                            ...reminderBase,
+                            start: allDayStart,
+                            end: allDayEnd,
+                            repeat: repeat as any,
+                            rrule: rrule ?? null,
+                            icalMeta: { create: { ...reminderICalMeta, uid } },
+                        },
+                    });
+                    importedIds.push(saved.id);
+                }
             } else {
-                const saved = await prisma.event.create({ data: reminderData });
+                const saved = await prisma.event.create({
+                    data: {
+                        ...reminderBase,
+                        start: allDayStart,
+                        end: allDayEnd,
+                        repeat: repeat as any,
+                        rrule: rrule ?? null,
+                    },
+                });
                 importedIds.push(saved.id);
             }
             continue;
@@ -389,26 +435,32 @@ export async function importIcsFromText(
         }
         const { windowStart: baseWindowStart, windowEnd: baseWindowEnd } = baseWindow;
 
+        // Campos del núcleo del evento (modo SMART, sin metadatos iCal)
         const smartBase = {
             userId: user.id,
             calendarId: calendar.id,
             kind: 'EVENTO' as const,
             title: summary,
             description,
-            location,
             tzid,
             isAllDay: false,
-            transparency: 'OPAQUE' as DbEvent['transparency'],
             participatesInScheduling: true,
             isFixed: false,
             priority: 'RELEVANTE' as const,
-            statusIcal,
-            sequence,
             category: null,
             status: 'WAITLIST' as const,
             window: 'RANGO' as const,
             windowStart: baseWindowStart,
             windowEnd: baseWindowEnd,
+        };
+
+        // Metadatos iCal para modo SMART
+        const smartICalMeta = {
+            calendarId: calendar.id,
+            location,
+            statusIcal,
+            sequence,
+            transparency: 'OPAQUE' as ICalTransparency,
         };
 
         const smartDurationMinutes = Math.max(1, Math.round(durationMs / 60000));
@@ -458,29 +510,37 @@ export async function importIcsFromText(
                 continue;
             }
             const { windowStart, windowEnd } = singleWindow;
-            if (whereByUid) {
-                const saved = await prisma.event.upsert({
-                    where: whereByUid,
-                    update: {
-                        ...baseEventData,
-                        windowStart,
-                        windowEnd,
-                        originEventId: null,
-                    },
-                    create: uid
-                        ? { ...baseEventData, uid, windowStart, windowEnd }
-                        : { ...baseEventData, windowStart, windowEnd },
-                });
-                importedIds.push(saved.id);
-                schedulingCandidates.push(saved);
+
+            if (uid) {
+                const existing = await findEventByICalUid(calendar.id, uid);
+                if (existing) {
+                    const saved = await prisma.event.update({
+                        where: { id: existing.id },
+                        data: {
+                            ...baseEventData,
+                            windowStart,
+                            windowEnd,
+                            originEventId: null,
+                            icalMeta: { update: smartICalMeta },
+                        },
+                    });
+                    importedIds.push(saved.id);
+                    schedulingCandidates.push(saved);
+                } else {
+                    const saved = await prisma.event.create({
+                        data: {
+                            ...baseEventData,
+                            windowStart,
+                            windowEnd,
+                            icalMeta: { create: { ...smartICalMeta, uid } },
+                        },
+                    });
+                    importedIds.push(saved.id);
+                    schedulingCandidates.push(saved);
+                }
             } else {
                 const saved = await prisma.event.create({
-                    data: {
-                        ...baseEventData,
-                        windowStart,
-                        windowEnd,
-                    },
-                    create: uid ? { ...baseEventData, uid } : baseEventData,
+                    data: { ...baseEventData, windowStart, windowEnd },
                 });
                 importedIds.push(saved.id);
                 schedulingCandidates.push(saved);
@@ -500,14 +560,18 @@ export async function importIcsFromText(
                 continue;
             }
             const { windowStart, windowEnd } = occurrenceWindow;
-            const data = {
+
+            // Solo el primer evento de la serie recibe el icalMeta con uid
+            const createData: Prisma.EventUncheckedCreateInput = {
                 ...baseEventData,
                 windowStart,
                 windowEnd,
-                ...(index === 0 && uid ? { uid } : {}),
                 ...(master ? { originEventId: master.id } : {}),
+                ...(index === 0 && uid
+                    ? { icalMeta: { create: { ...smartICalMeta, uid } } }
+                    : {}),
             };
-            const created = await prisma.event.create({ data });
+            const created = await prisma.event.create({ data: createData });
             if (!master) {
                 master = created;
             }

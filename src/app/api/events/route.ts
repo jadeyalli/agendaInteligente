@@ -562,17 +562,21 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
 
       isFixed: data.isFixed ?? false,
       participatesInScheduling: data.participatesInScheduling ?? true,
-      transparency: data.transparency ?? null,
       status: data.status ?? 'SCHEDULED',
 
       tzid,
       isAllDay: Boolean(data.isAllDay),
+
+      // transparency va en EventICalMeta, no en Event
+      ...(data.transparency != null ? {
+        icalMeta: { create: { transparency: data.transparency } },
+      } : {}),
     },
   });
 
   if (!needsSeries || restOccurrences.length === 0) return [master];
 
-  // Instancias hijas planas (repeat = NONE)
+  // Instancias hijas planas (repeat = NONE) — sin icalMeta propio
   const tx = restOccurrences.map(({ start, end }) =>
     prisma.event.create({
       data: {
@@ -602,7 +606,6 @@ async function createEventSeries(userId: string, data: z.infer<typeof EventCreat
 
         isFixed: data.isFixed ?? false,
         participatesInScheduling: data.participatesInScheduling ?? true,
-        transparency: data.transparency ?? null,
         status: data.status ?? 'SCHEDULED',
 
         tzid,
@@ -755,12 +758,14 @@ async function createReminderSeries(
       canOverlap: true,
       participatesInScheduling: false,
       isFixed: false,
-      transparency: 'TRANSPARENT',
       status: 'SCHEDULED',
 
       window: 'NONE',
       windowStart: null,
       windowEnd: null,
+
+      // Los recordatorios son siempre TRANSPARENT (no bloquean tiempo en iCal)
+      icalMeta: { create: { transparency: 'TRANSPARENT' as ICalTransparency } },
     },
   });
 
@@ -790,7 +795,6 @@ async function createReminderSeries(
         canOverlap: true,
         participatesInScheduling: false,
         isFixed: false,
-        transparency: 'TRANSPARENT',
         status: 'SCHEDULED',
 
         window: 'NONE',
@@ -906,9 +910,10 @@ export async function GET(req: Request) {
       where,
       orderBy: [{ start: 'asc' }, { createdAt: 'desc' }],
       take: 5000,
+      include: { icalMeta: true },
     });
 
-    // ✅ GARANTIZAR que todas las fechas sean ISO strings
+    // Garantizar que todas las fechas sean ISO strings
     const normalized = rows.map((event) => ({
       ...event,
       start: event.start ? event.start.toISOString() : null,
@@ -918,9 +923,10 @@ export async function GET(req: Request) {
       windowEnd: event.windowEnd ? event.windowEnd.toISOString() : null,
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),
-      lastModified: event.lastModified ? event.lastModified.toISOString() : null,
-      createdIcal: event.createdIcal ? event.createdIcal.toISOString() : null,
       completedAt: event.completedAt ? event.completedAt.toISOString() : null,
+      // Exponer metadatos iCal relevantes desde el modelo separado
+      transparency: event.icalMeta?.transparency ?? null,
+      location: event.icalMeta?.location ?? null,
     }));
 
     return NextResponse.json(normalized);

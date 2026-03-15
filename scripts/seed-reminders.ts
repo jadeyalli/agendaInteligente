@@ -2,7 +2,7 @@
  * seed-reminders.ts
  * Crea recordatorios de prueba para el usuario test@agenda.com.
  * Los recordatorios tienen kind=RECORDATORIO y priority=RECORDATORIO.
- * No bloquean tiempo en la agenda (canOverlap=true, transparency=TRANSPARENT).
+ * No bloquean tiempo en la agenda (canOverlap=true).
  *
  * Uso: npm run db:seed-reminders
  *
@@ -10,7 +10,7 @@
  * Si no existe, ejecuta primero: npm run db:seed-events
  */
 
-import { PrismaClient, Priority, EventKind, RepeatRule, AvailabilityWindow, ICalTransparency } from '@prisma/client';
+import { PrismaClient, Priority, EventKind, RepeatRule, AvailabilityWindow } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -28,7 +28,7 @@ async function main() {
   // ── Buscar usuario de prueba ─────────────────────────────────────────────
   const user = await prisma.user.findUnique({
     where: { email: 'test@agenda.com' },
-    include: { calendars: true },
+    include: { calendar: true },
   });
 
   if (!user) {
@@ -37,7 +37,7 @@ async function main() {
     process.exit(1);
   }
 
-  const calendar = user.calendars[0];
+  const calendar = user.calendar;
   if (!calendar) {
     console.error('❌ El usuario no tiene ningún calendario.');
     process.exit(1);
@@ -64,7 +64,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
     },
@@ -83,7 +82,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
     },
@@ -102,7 +100,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
     },
@@ -121,7 +118,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
     },
@@ -141,7 +137,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       repeat: RepeatRule.DAILY,
       rrule: 'FREQ=DAILY',
       window: AvailabilityWindow.NONE,
@@ -162,7 +157,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       repeat: RepeatRule.DAILY,
       rrule: 'FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR',
       window: AvailabilityWindow.NONE,
@@ -184,7 +178,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       repeat: RepeatRule.WEEKLY,
       rrule: 'FREQ=WEEKLY;BYDAY=FR',
       window: AvailabilityWindow.NONE,
@@ -205,7 +198,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       repeat: RepeatRule.WEEKLY,
       rrule: 'FREQ=WEEKLY;BYDAY=MO',
       window: AvailabilityWindow.NONE,
@@ -227,7 +219,6 @@ async function main() {
       isInPerson: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: ICalTransparency.TRANSPARENT,
       repeat: RepeatRule.MONTHLY,
       rrule: 'FREQ=MONTHLY;BYMONTHDAY=1',
       window: AvailabilityWindow.NONE,

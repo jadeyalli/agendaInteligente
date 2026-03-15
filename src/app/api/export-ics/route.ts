@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
 
@@ -51,7 +52,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const calendarFilter = searchParams.get('calendarId');
 
-    const where: Parameters<typeof prisma.event.findMany>[0]['where'] = {
+    const where: Prisma.EventWhereInput = {
       userId: user.id,
     };
     if (calendarFilter && calendarFilter !== 'all') {
@@ -63,6 +64,7 @@ export async function GET(req: Request) {
         where,
         orderBy: [{ start: 'asc' }, { createdAt: 'asc' }],
         take: 5000,
+        include: { icalMeta: true },
       }),
       prisma.userSettings.findUnique({ where: { userId: user.id } }),
     ]);
@@ -83,7 +85,7 @@ export async function GET(req: Request) {
       if (ev.kind === 'TAREA') {
         // VTODO
         lines.push('BEGIN:VTODO');
-        lines.push(`UID:${ev.uid ?? ev.id}@agenda-inteligente`);
+        lines.push(`UID:${ev.icalMeta?.uid ?? ev.id}@agenda-inteligente`);
         lines.push(`DTSTAMP:${now}`);
         lines.push(`CREATED:${toIcsDate(ev.createdAt)}`);
         lines.push(`LAST-MODIFIED:${toIcsDate(ev.updatedAt)}`);
@@ -109,11 +111,11 @@ export async function GET(req: Request) {
       if (!ev.start) continue; // sin fecha → no exportable como VEVENT
 
       lines.push('BEGIN:VEVENT');
-      lines.push(`UID:${ev.uid ?? ev.id}@agenda-inteligente`);
+      lines.push(`UID:${ev.icalMeta?.uid ?? ev.id}@agenda-inteligente`);
       lines.push(`DTSTAMP:${now}`);
       lines.push(`CREATED:${toIcsDate(ev.createdAt)}`);
       lines.push(`LAST-MODIFIED:${toIcsDate(ev.updatedAt)}`);
-      lines.push(`SEQUENCE:${ev.sequence ?? 0}`);
+      lines.push(`SEQUENCE:${ev.icalMeta?.sequence ?? 0}`);
 
       if (ev.isAllDay) {
         lines.push(`DTSTART;VALUE=DATE:${toIcsDateOnly(ev.start)}`);
@@ -137,14 +139,16 @@ export async function GET(req: Request) {
       lines.push(foldLine(`SUMMARY:${escapeIcs(ev.title)}`));
       if (ev.description) lines.push(foldLine(`DESCRIPTION:${escapeIcs(ev.description)}`));
       if (ev.category) lines.push(foldLine(`CATEGORIES:${escapeIcs(ev.category)}`));
-      if (ev.location) lines.push(foldLine(`LOCATION:${escapeIcs(ev.location)}`));
+      if (ev.icalMeta?.location) lines.push(foldLine(`LOCATION:${escapeIcs(ev.icalMeta.location)}`));
 
+      const statusIcal = ev.icalMeta?.statusIcal;
       const status =
-        ev.statusIcal === 'TENTATIVE' ? 'TENTATIVE' :
-        ev.statusIcal === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED';
+        statusIcal === 'TENTATIVE' ? 'TENTATIVE' :
+        statusIcal === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED';
       lines.push(`STATUS:${status}`);
 
-      const transp = ev.transparency === 'TRANSPARENT' ? 'TRANSPARENT' : 'OPAQUE';
+      const transparency = ev.icalMeta?.transparency;
+      const transp = transparency === 'TRANSPARENT' ? 'TRANSPARENT' : 'OPAQUE';
       lines.push(`TRANSP:${transp}`);
 
       if (ev.rrule) lines.push(foldLine(`RRULE:${ev.rrule.replace(/^FREQ/, 'FREQ')}`));

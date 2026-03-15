@@ -39,7 +39,7 @@ export async function POST(request: Request) {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    include: { calendars: { select: { id: true } } },
+    include: { calendar: { select: { id: true } } },
   });
 
   if (!user) {
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       id: user.id,
       email: user.email,
       name: user.name,
-      calendarIds: user.calendars.map((calendar) => calendar.id),
+      calendarIds: user.calendar ? [user.calendar.id] : [],
     },
   });
 }

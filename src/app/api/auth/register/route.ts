@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       name: name || null,
       email,
       password: hashPassword(password),
-      calendars: {
+      calendar: {
         create: {
           name: 'Calendario principal',
           color: '#6366F1',
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       },
     },
     include: {
-      calendars: { select: { id: true } },
+      calendar: { select: { id: true } },
     },
   });
 
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
       id: user.id,
       email: user.email,
       name: user.name,
-      calendarIds: user.calendars.map((calendar) => calendar.id),
+      calendarIds: user.calendar ? [user.calendar.id] : [],
     },
   });
 }

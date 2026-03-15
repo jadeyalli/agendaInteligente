@@ -109,7 +109,6 @@ async function main() {
       participatesInScheduling: true,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
-      location: 'Edificio B, Aula 204',
     },
     {
       userId: user.id,
@@ -128,7 +127,6 @@ async function main() {
       participatesInScheduling: true,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
-      location: 'Cubículo 12, Posgrado',
     },
     {
       userId: user.id,
@@ -165,7 +163,6 @@ async function main() {
       participatesInScheduling: true,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
-      location: 'Centro de Salud San Rafael',
     },
     {
       userId: user.id,
@@ -184,7 +181,6 @@ async function main() {
       participatesInScheduling: true,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
-      location: 'Sala ejecutiva piso 10',
     },
 
     // ═══════════════════════════════════════════
@@ -338,7 +334,6 @@ async function main() {
       participatesInScheduling: true,
       window: AvailabilityWindow.SEMANA,
       status: 'SCHEDULED',
-      location: 'Casa de mamá',
     },
     {
       userId: user.id,
@@ -498,7 +493,6 @@ async function main() {
       isFixed: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: 'TRANSPARENT',
       repeat: RepeatRule.DAILY,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
@@ -517,7 +511,6 @@ async function main() {
       isFixed: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: 'TRANSPARENT',
       repeat: RepeatRule.DAILY,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
@@ -536,7 +529,6 @@ async function main() {
       isFixed: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: 'TRANSPARENT',
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
     },
@@ -554,7 +546,6 @@ async function main() {
       isFixed: false,
       canOverlap: true,
       participatesInScheduling: false,
-      transparency: 'TRANSPARENT',
       repeat: RepeatRule.DAILY,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',

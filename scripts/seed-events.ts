@@ -112,7 +112,6 @@ async function main() {
       participatesInScheduling: true,
       window: AvailabilityWindow.NONE,
       status: 'SCHEDULED',
-      location: 'Sala de conferencias A',
     },
 
     {
@@ -297,7 +296,6 @@ async function main() {
       windowStart: today(9, 0, 5),     // desde en 5 días
       windowEnd: today(18, 0, 14),     // hasta en 14 días
       status: 'SCHEDULED',
-      location: 'Sala de capacitación',
     },
   ];
 
