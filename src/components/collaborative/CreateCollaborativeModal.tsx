@@ -21,13 +21,6 @@ interface ParticipantEntry {
 const inputBase =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-[var(--fg)] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/60';
 
-/** Formatea un slot para mostrarlo en el selector. */
-function fmtSlot(slot: AvailableSlot): string {
-  const day = new Intl.DateTimeFormat('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }).format(slot.start);
-  const start = new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }).format(slot.start);
-  const end = new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }).format(slot.end);
-  return `${day} · ${start}–${end}`;
-}
 
 /**
  * Modal para que el anfitrión cree un evento colaborativo.

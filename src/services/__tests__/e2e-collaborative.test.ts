@@ -101,10 +101,18 @@ beforeAll(async () => {
     where: { userId: { in: [state.userAId, state.userBId] } },
   });
 
-  // Eliminar eventos locales huérfanos de ejecuciones anteriores del test
+  // Eliminar eventos locales huérfanos de ejecuciones anteriores del test.
+  // Incluye los rastreados por participantes y cualquier residuo con el título
+  // del evento colaborativo que haya quedado huérfano sin referencia en participantes.
   if (orphanedEventIds.length > 0) {
     await prisma.event.deleteMany({ where: { id: { in: orphanedEventIds } } });
   }
+  await prisma.event.deleteMany({
+    where: {
+      userId: { in: [state.userAId, state.userBId] },
+      title: 'Reunión de tesis',
+    },
+  });
 }, 15_000);
 
 afterAll(async () => {

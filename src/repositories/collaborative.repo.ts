@@ -180,6 +180,17 @@ export class CollaborativeRepository {
   }
 
   /**
+   * Borra la referencia al evento local de un participante (localEventId → null).
+   * Se usa cuando el evento local es eliminado (p.ej. al aprobar un reagendamiento).
+   */
+  async clearParticipantLocalEvent(participantId: string): Promise<void> {
+    await prisma.collabParticipant.update({
+      where: { id: participantId },
+      data: { localEventId: null },
+    });
+  }
+
+  /**
    * Obtiene un participante por collabEventId y userId. Retorna null si no existe.
    */
   async findParticipant(

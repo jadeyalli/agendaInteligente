@@ -270,6 +270,10 @@ export class CollaborativeService {
       participant.timezone,
     );
 
+    if (participant.localEventId) {
+      await eventRepository.delete(participant.localEventId);
+    }
+
     const localEvent = await eventRepository.create({
       userId,
       title: event.title,
@@ -431,7 +435,8 @@ export class CollaborativeService {
 
     const hostParticipant = event.participants.find((p) => p.role === 'HOST');
     if (hostParticipant?.localEventId) {
-      await eventRepository.updateFixed(hostParticipant.localEventId, false);
+      await eventRepository.delete(hostParticipant.localEventId);
+      await collaborativeRepository.clearParticipantLocalEvent(hostParticipant.id);
     }
   }
 
