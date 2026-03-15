@@ -21,7 +21,9 @@
       "Bash(python -m pytest solver/tests/ -v --tb=short)",
       "Bash(pip install:*)",
       "Bash(python -m solver solver/tests/fixtures/basic_3_events.json)",
-      "Bash(python -m pytest solver/tests/ -v)"
+      "Bash(python -m pytest solver/tests/ -v)",
+      "Bash(find /c/Users/jadey/proyecto-final/agenda-inteligente/src -type f -name *.ts -o -name *.tsx)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
     ]
   }
 }
