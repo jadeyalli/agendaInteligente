@@ -16,6 +16,7 @@ import SettingsForm from '@/app/settings/SettingsForm';
 import ProfileForm from './ProfileForm';
 import PasswordForm from './PasswordForm';
 import ThemeSelector from './ThemeSelector';
+import CategoriesForm from './CategoriesForm';
 
 async function loadUserSettings(userId: string): Promise<{ settings: UserSettingsValues; slots: AvailabilitySlotInput[] }> {
   const [record, slotRecords] = await Promise.all([
@@ -123,6 +124,17 @@ export default async function ProfilePage({
             <p className={subClass}>Elige el tema visual del calendario.</p>
           </div>
           <ThemeSelector />
+        </section>
+
+        {/* Categorías */}
+        <section className={sectionClass}>
+          <div>
+            <h2 className={headingClass}>Categorías</h2>
+            <p className={subClass}>
+              Administra las categorías disponibles al crear eventos y recordatorios.
+            </p>
+          </div>
+          <CategoriesForm />
         </section>
 
         {/* Configuración de agendamiento */}

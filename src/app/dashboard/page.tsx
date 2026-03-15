@@ -1,6 +1,6 @@
 'use client';
 import '../globals.css';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 
 import { type ThemeKey, currentTheme, applyTheme } from '@/theme/themes';
+import WaitlistPanel from '@/components/WaitlistPanel';
+import { type EventRow } from '@/lib/waitlist-utils';
 
 /** Tipos que recibiremos desde el calendario */
 type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
@@ -30,14 +32,6 @@ const Calendar = dynamic<CalendarProps>(
   () => import('@/components/Calendar').then((m) => m.default ?? m),
   { ssr: false },
 );
-
-type NavItem = { href: string; label: string; icon: React.ReactNode; active?: boolean };
-
-const NAV: NavItem[] = [
-  { href: '/dashboard', label: 'Calendario', icon: <CalendarIcon className="h-4 w-4" />, active: true },
-  { href: '/dashboard/waitlist', label: 'Lista de espera', icon: <Clock3 className="h-4 w-4" /> },
-  { href: '/profile', label: 'Perfil', icon: <User className="h-4 w-4" /> },
-];
 
 function getInitials(name?: string | null, email?: string | null): string {
   if (name) {
@@ -55,11 +49,26 @@ export default function DashboardHomePage() {
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ name?: string | null; email?: string | null } | null>(null);
 
+  // Waitlist panel state
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [waitlistRows, setWaitlistRows] = useState<EventRow[]>([]);
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
+
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => { if (data) setCurrentUser(data); })
       .catch(() => {});
+  }, []);
+
+  const openWaitlist = useCallback(() => {
+    setWaitlistOpen(true);
+    setWaitlistLoading(true);
+    fetch('/api/events')
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setWaitlistRows(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setWaitlistLoading(false));
   }, []);
 
   async function handleLogout() {
@@ -103,6 +112,64 @@ export default function DashboardHomePage() {
       : 'lg:w-72 lg:opacity-100 lg:overflow-y-auto lg:pb-32',
   ].join(' ');
 
+  const navItems = [
+    {
+      label: 'Calendario',
+      icon: <CalendarIcon className="h-4 w-4" />,
+      active: true,
+      href: '/dashboard' as string | undefined,
+      onClick: undefined as (() => void) | undefined,
+    },
+    {
+      label: 'Lista de espera',
+      icon: <Clock3 className="h-4 w-4" />,
+      active: false,
+      href: undefined,
+      onClick: openWaitlist,
+    },
+    {
+      label: 'Perfil',
+      icon: <User className="h-4 w-4" />,
+      active: false,
+      href: '/profile',
+      onClick: undefined,
+    },
+  ];
+
+  function NavItems({ onItemClick }: { onItemClick?: () => void }) {
+    return (
+      <>
+        {navItems.map((item) =>
+          item.href ? (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={linkClass(item.active)}
+              onClick={onItemClick}
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900/5 text-slate-600">
+                {item.icon}
+              </span>
+              <span>{item.label}</span>
+            </Link>
+          ) : (
+            <button
+              key={item.label}
+              type="button"
+              className={linkClass(item.active)}
+              onClick={() => { item.onClick?.(); onItemClick?.(); }}
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900/5 text-slate-600">
+                {item.icon}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          ),
+        )}
+      </>
+    );
+  }
+
   return (
     <div
       className="min-h-screen bg-[var(--bg)] text-[var(--fg)]"
@@ -122,14 +189,7 @@ export default function DashboardHomePage() {
             </div>
 
             <nav className="space-y-1">
-              {NAV.map((item) => (
-                <Link key={item.href} href={item.href} className={linkClass(item.active)}>
-                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900/5 text-slate-600">
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                </Link>
-              ))}
+              <NavItems />
             </nav>
 
             <div className="mt-auto">
@@ -170,19 +230,7 @@ export default function DashboardHomePage() {
                 </button>
               </div>
               <nav className="space-y-1">
-                {NAV.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={linkClass(item.active)}
-                    onClick={() => setSidebarOpen(false)}
-                  >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900/5 text-slate-600">
-                      {item.icon}
-                    </span>
-                    <span>{item.label}</span>
-                  </Link>
-                ))}
+                <NavItems onItemClick={() => setSidebarOpen(false)} />
               </nav>
 
               <div className="mt-auto">
@@ -271,6 +319,14 @@ export default function DashboardHomePage() {
           </footer>
         </div>
       </div>
+
+      {/* Waitlist slide-over panel */}
+      <WaitlistPanel
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
+        rows={waitlistRows}
+        loading={waitlistLoading}
+      />
     </div>
   );
 }

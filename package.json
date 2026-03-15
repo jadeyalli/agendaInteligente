@@ -8,6 +8,7 @@
     "db:reset": "npx tsx scripts/reset-db.ts",
     "db:seed-events": "npx tsx scripts/seed-events.ts",
     "db:seed-reminders": "npx tsx scripts/seed-reminders.ts",
+    "db:seed-calendar": "npx tsx scripts/seed-calendar.ts",
     "db:seed": "npm run db:seed-events && npm run db:seed-reminders",
     "db:fresh": "npm run db:reset && npm run db:seed",
     "predev": "npm run db:prepare",

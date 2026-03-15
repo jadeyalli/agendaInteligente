@@ -242,6 +242,7 @@ model UserSettings {
   weightUrgency          Int @default(2)
   weightWorkHours        Int @default(2)
   weightCrossDay         Int @default(2)
+  categories             String @default("[\"Escuela\",\"Trabajo\",\"Personal\",\"Familia\",\"Salud\"]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
