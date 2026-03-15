@@ -15,6 +15,8 @@ import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/cre
 import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
 import OptionalEventsPanel from '@/components/OptionalEventsPanel';
+import AvailableSlots, { type AvailableSlot } from '@/components/AvailableSlots';
+import DayActionsModal from '@/components/DayActionsModal';
 import { useToast } from '@/components/ui/ToastProvider';
 
 import { THEMES, currentTheme } from '@/theme/themes';
@@ -119,6 +121,9 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
   const [openImport, setOpenImport] = useState(false);
   const [openOptionalPanel, setOpenOptionalPanel] = useState(false);
+  const [openDayActions, setOpenDayActions] = useState(false);
+  const [dayActionsDate, setDayActionsDate] = useState<Date>(new Date());
+  const [showCompleted, setShowCompleted] = useState(true);
 
   // Vista previa
   const [openPreview, setOpenPreview] = useState(false);
@@ -128,6 +133,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   // datos del backend y rango visible
   const [rows, setRows] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [phantomBlocks, setPhantomBlocks] = useState<Array<{ id: string; collabEventId: string; start: string; end: string }>>([]);
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
   const [enabledDayCodes, setEnabledDayCodes] = useState<DayCode[]>(
     DEFAULT_USER_SETTINGS.enabledDays,
@@ -144,6 +150,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [slotMaxTime, setSlotMaxTime] = useState<string>(
     defaultRangeValid ? hhmmToFullCalendar(DEFAULT_USER_SETTINGS.dayEnd) : '24:00:00',
   );
+  const [userDayStart, setUserDayStart] = useState(DEFAULT_USER_SETTINGS.dayStart);
+  const [userDayEnd, setUserDayEnd] = useState(DEFAULT_USER_SETTINGS.dayEnd);
 
   const calendarRef = useRef<FullCalendar | null>(null);
   const api = () => calendarRef.current?.getApi();
@@ -178,7 +186,18 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
   }
 
-  useEffect(() => { loadEvents(); }, []);
+  useEffect(() => { loadEvents(); loadPhantomBlocks(); }, []);
+
+  async function loadPhantomBlocks() {
+    try {
+      const res = await fetch('/api/collaborative/phantom', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setPhantomBlocks(Array.isArray(data) ? data : []);
+    } catch {
+      // fallo silencioso — los bloques fantasma son auxiliares
+    }
+  }
 
   useEffect(() => {
     async function loadSettings() {
@@ -199,6 +218,8 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
         setSlotMinTime(hasValidRange ? hhmmToFullCalendar(data.dayStart) : '00:00:00');
         setSlotMaxTime(hasValidRange ? hhmmToFullCalendar(data.dayEnd) : '24:00:00');
+        setUserDayStart(data.dayStart);
+        setUserDayEnd(data.dayEnd);
 
         const enabledCodes = Array.isArray(data.enabledDays)
           ? (data.enabledDays as DayCode[])
@@ -246,6 +267,72 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     () => rows.filter((r) => r.priority === 'OPCIONAL'),
     [rows],
   );
+
+  /** Slots libres de la semana actual (horas completas, max 8). */
+  const availableSlots = useMemo<AvailableSlot[]>(() => {
+    const { hour: startHour } = timeStringToParts(userDayStart);
+    const { hour: endHour } = timeStringToParts(userDayEnd);
+    if (endHour <= startHour) return [];
+
+    // Eventos que bloquean capacidad (excluye opcionales, recordatorios y waitlist)
+    const blocking = rows.filter(
+      (r) =>
+        r.start &&
+        r.end &&
+        r.priority !== 'OPCIONAL' &&
+        r.priority !== 'RECORDATORIO' &&
+        r.status !== 'WAITLIST',
+    );
+
+    const result: AvailableSlot[] = [];
+    const today = new Date();
+    // Lunes de la semana actual
+    const monday = new Date(today);
+    const jsDay = today.getDay(); // 0=Dom
+    const offsetToMonday = jsDay === 0 ? -6 : 1 - jsDay;
+    monday.setDate(today.getDate() + offsetToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const monthNames = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+    for (let d = 0; d < 7 && result.length < 8; d++) {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + d);
+
+      const jsWeekday = day.getDay(); // 0=Dom
+      const dayCode = JS_DAY_TO_DAY_CODE[jsWeekday];
+      if (!enabledDayCodes.includes(dayCode)) continue;
+      // No mostrar slots pasados (hoy hacia adelante)
+      if (day < today && day.toDateString() !== today.toDateString()) continue;
+
+      const dayLabel = `${DAY_NAMES[jsWeekday]} ${day.getDate()} ${monthNames[day.getMonth()]}`;
+
+      for (let h = startHour; h < endHour && result.length < 8; h++) {
+        const slotStart = new Date(day);
+        slotStart.setHours(h, 0, 0, 0);
+        // No mostrar slots que ya pasaron
+        if (slotStart < new Date()) continue;
+
+        const slotEnd = new Date(day);
+        slotEnd.setHours(h + 1, 0, 0, 0);
+        if (slotEnd.getHours() > endHour) continue;
+
+        const slotStartMs = slotStart.getTime();
+        const slotEndMs = slotEnd.getTime();
+
+        const isFree = blocking.every((r) => {
+          const evStart = new Date(r.start!).getTime();
+          const evEnd = new Date(r.end!).getTime();
+          return evEnd <= slotStartMs || evStart >= slotEndMs;
+        });
+
+        if (isFree) result.push({ start: slotStart, end: slotEnd, dayLabel });
+      }
+    }
+
+    return result;
+  }, [rows, enabledDayCodes, userDayStart, userDayEnd]);
 
   const waitlistTotal = useMemo(
     () => waitlistGroups.reduce((sum, group) => sum + group.events.length, 0),
@@ -415,6 +502,61 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setCreating(false);
     }
   }
+
+  async function handleToggleFixed(eventId: string) {
+    try {
+      const event = rows.find((r) => r.id === eventId);
+      if (!event) return;
+      const res = await fetch(`/api/events?id=${encodeURIComponent(eventId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isFixed: !event.isFixed }),
+      });
+      if (!res.ok) throw new Error('No se pudo actualizar');
+      await loadEvents();
+    } catch {
+      toast('No se pudo actualizar el evento.', 'error');
+    }
+  }
+
+  async function handleToggleCompleted(eventId: string) {
+    try {
+      const event = rows.find((r) => r.id === eventId);
+      if (!event) return;
+      const isNowCompleted = event.status !== 'COMPLETED';
+      const res = await fetch(`/api/events?id=${encodeURIComponent(eventId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: isNowCompleted ? 'COMPLETED' : 'SCHEDULED' }),
+      });
+      if (!res.ok) throw new Error('No se pudo actualizar');
+      await loadEvents();
+    } catch {
+      toast('No se pudo actualizar el evento.', 'error');
+    }
+  }
+
+  function handleOpenDayActions(date: Date) {
+    setDayActionsDate(date);
+    setOpenDayActions(true);
+  }
+
+  const handleSlotClick = (start: Date, end: Date) => {
+    setCreateInitial({
+      kind: 'EVENTO',
+      title: '',
+      description: '',
+      category: '',
+      priority: 'RELEVANTE',
+      repeat: 'NONE',
+      window: 'NONE',
+      date: dateToDateStringLocal(start, browserTimeZone),
+      timeStart: dateToTimeStringLocal(start, browserTimeZone),
+      timeEnd: dateToTimeStringLocal(end, browserTimeZone),
+      durationHours: '1',
+    });
+    setOpenCreate(true);
+  };
 
   const handleScheduleFromOptional = (eventId: string) => {
     const event = rows.find((r) => r.id === eventId);
@@ -586,6 +728,10 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
         const windowCode = row.window || 'NONE';
         const p = (row.priority || 'RELEVANTE') as 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | 'RECORDATORIO';
         const classNames = [`prio-${p}`];
+        if (row.status === 'COMPLETED') {
+          if (!showCompleted) continue;
+          classNames.push('event-completed');
+        }
 
         // 1) Eventos con start/end
         if (startStr) {
@@ -603,6 +749,36 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               textColor: labelFgs[p],
               extendedProps: { kind, priority: row.priority, raw: row },
             });
+          } else if (p === 'RECORDATORIO') {
+            // Recordatorio de punto: start == end o sin end → dot visual
+            const isPoint = !endStr || endStr === startStr;
+            if (isPoint) {
+              // Asignar 30 min de duración visual para que aparezca en el calendario
+              const startMs = new Date(startStr).getTime();
+              const displayEnd = new Date(startMs + 30 * 60 * 1000).toISOString();
+              out.push({
+                id: row.id,
+                title: row.title,
+                start: startStr,
+                end: displayEnd,
+                classNames: [...classNames, 'reminder-point'],
+                color: labelColors[p],
+                textColor: labelFgs[p],
+                extendedProps: { kind, priority: row.priority, raw: row },
+              });
+            } else {
+              // Recordatorio de rango: semi-transparente, se superpone
+              out.push({
+                id: row.id,
+                title: row.title,
+                start: startStr,
+                end: endStr,
+                classNames: [...classNames, 'reminder-range'],
+                color: labelColors[p],
+                textColor: labelFgs[p],
+                extendedProps: { kind, priority: row.priority, raw: row },
+              });
+            }
           } else {
             out.push({
               id: row.id,
@@ -701,8 +877,21 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
       }
     }
 
+    // Bloques fantasma: reservas de eventos colaborativos (borde punteado, fondo rayado)
+    for (const phantom of phantomBlocks) {
+      out.push({
+        id: `phantom_${phantom.id}`,
+        title: 'Reservado (colaborativo)',
+        start: phantom.start,
+        end: phantom.end,
+        classNames: ['phantom-block'],
+        editable: false,
+        extendedProps: { isPhantom: true, collabEventId: phantom.collabEventId },
+      });
+    }
+
     return out;
-  }, [rows, visibleRange, theme, disabledJsDayIndexes]);
+  }, [rows, visibleRange, theme, disabledJsDayIndexes, phantomBlocks, showCompleted]);
 
   // Navegación
   const changeView = (v: ViewId) => {
@@ -790,6 +979,20 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               </label>
             </div>
 
+            <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-3 py-1 text-sm font-medium text-[var(--muted)] shadow-sm">
+              <span>Completados</span>
+              <label className="relative inline-flex h-6 w-11 items-center">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={showCompleted}
+                  onChange={(e) => setShowCompleted(e.target.checked)}
+                />
+                <span className="absolute inset-0 rounded-full bg-slate-300 transition peer-checked:bg-indigo-500" />
+                <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+              </label>
+            </div>
+
             <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-2 py-1 shadow-sm">
               <button className={arrowBtn} type="button" onClick={prev} aria-label="Vista anterior">
                 ◀
@@ -799,6 +1002,14 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               </button>
             </div>
 
+            <button
+              className="inline-flex items-center rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+              onClick={() => handleOpenDayActions(new Date())}
+              type="button"
+              title="Ver lista de eventos de hoy"
+            >
+              Lista del día
+            </button>
             <button
               className="inline-flex items-center rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-60"
               onClick={() => {
@@ -928,6 +1139,15 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                   }}
 
                   eventContent={(arg) => {
+                    const isPoint = arg.event.classNames.includes('reminder-point');
+                    if (isPoint) {
+                      return (
+                        <div className="flex items-center gap-1 truncate text-xs font-medium">
+                          <span className="h-2 w-2 shrink-0 rounded-full bg-current opacity-80" />
+                          <span className="truncate">{arg.event.title}</span>
+                        </div>
+                      );
+                    }
                     const timeText = arg.timeText ? `${arg.timeText} ` : '';
                     return (
                       <div className="truncate text-xs font-medium text-[var(--fg)] sm:text-[13px]">
@@ -1047,6 +1267,18 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               </div>
             )}
           </div>
+          {/* Slots disponibles */}
+          <div className="border-t border-slate-200/70 px-4 py-4">
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold text-[var(--fg)]">Horas libres esta semana</h3>
+              <p className="text-xs text-[var(--muted)]">Haz clic para crear un evento</p>
+            </div>
+            <AvailableSlots
+              slots={availableSlots}
+              onSlotClick={handleSlotClick}
+              maxVisible={8}
+            />
+          </div>
         </aside>
       </div>
 
@@ -1083,6 +1315,47 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
         open={openImport}
         onClose={() => setOpenImport(false)}
         onImported={async () => { await loadEvents(); }}
+      />
+
+      {/* Modal lista del día */}
+      <DayActionsModal
+        isOpen={openDayActions}
+        date={dayActionsDate}
+        events={rows
+          .filter((r) => {
+            if (!r.start) return false;
+            const evDate = new Date(r.start);
+            return evDate.toDateString() === dayActionsDate.toDateString();
+          })
+          .map((r) => ({
+            id: r.id,
+            title: r.title,
+            start: r.start ? new Date(r.start) : new Date(),
+            end: r.end ? new Date(r.end) : null,
+            priority: r.priority ?? 'RELEVANTE',
+            category: r.category ?? null,
+            isFixed: !!(r as EventRow & { isFixed?: boolean }).isFixed,
+            completed: r.status === 'COMPLETED',
+          }))}
+        onClose={() => setOpenDayActions(false)}
+        onEdit={(id) => {
+          setOpenDayActions(false);
+          const row = rows.find((r) => r.id === id);
+          if (!row) return;
+          const initial = mapRowToEditInitial(row, browserTimeZone);
+          setEditInitial(initial);
+          setEditingId(id);
+          setEditTab(initial?.kind === 'RECORDATORIO' ? 'recordatorio' : 'evento');
+          setOpenEdit(true);
+        }}
+        onDelete={async (id) => {
+          const row = rows.find((r) => r.id === id);
+          if (!row) return;
+          setOpenDayActions(false);
+          await handleDelete(row as PreviewRow);
+        }}
+        onToggleFixed={handleToggleFixed}
+        onToggleCompleted={handleToggleCompleted}
       />
 
       {/* Panel de eventos opcionales */}

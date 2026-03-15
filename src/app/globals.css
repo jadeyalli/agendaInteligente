@@ -385,3 +385,58 @@ body {
 .dark .fc .fc-timegrid-axis-cushion { color: rgb(203 213 225); }    /* slate-300 */
 .dark .fc .fc-daygrid-day-number { color: rgb(226 232 240); }       /* slate-200 */
 
+/* ===== Recordatorios ===== */
+
+/* Recordatorio de rango: semi-transparente, no bloquea visualmente otros eventos */
+.fc .fc-event.reminder-range {
+  opacity: 0.55 !important;
+  pointer-events: auto;
+}
+.fc .fc-event.reminder-range:hover {
+  opacity: 0.8 !important;
+}
+
+/* Recordatorio de punto: altura mínima, muestra solo el dot */
+.fc .fc-event.reminder-point {
+  min-height: 18px !important;
+  max-height: 22px !important;
+  opacity: 0.85;
+  border-radius: 999px !important;
+  padding: 1px 6px !important;
+}
+
+/* Recordatorio de todo el día: línea continua en sección all-day */
+.fc .fc-daygrid-event.prio-RECORDATORIO {
+  border-radius: 3px !important;
+  border-left: 4px solid var(--prio-recordatorio) !important;
+  opacity: 0.8;
+}
+
+/* ===== Bloques fantasma (PhantomBlock) ===== */
+.fc .fc-event.phantom-block {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(148, 163, 184, 0.25),
+    rgba(148, 163, 184, 0.25) 4px,
+    rgba(248, 250, 252, 0.5) 4px,
+    rgba(248, 250, 252, 0.5) 8px
+  ) !important;
+  border: 2px dashed rgb(148 163 184) !important;
+  border-radius: 0.5rem !important;
+  color: rgb(100 116 139) !important;
+  pointer-events: auto;
+  cursor: not-allowed;
+}
+.fc .fc-event.phantom-block:hover {
+  filter: brightness(1.05);
+}
+
+/* ===== Eventos completados ===== */
+.fc .fc-event.event-completed {
+  opacity: 0.45 !important;
+  filter: grayscale(0.4);
+}
+.fc .fc-event.event-completed .fc-event-title {
+  text-decoration: line-through;
+}
+
