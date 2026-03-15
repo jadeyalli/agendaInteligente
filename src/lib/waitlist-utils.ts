@@ -16,6 +16,7 @@ export type EventRow = {
   windowStart?: string | null;
   windowEnd?: string | null;
   durationMinutes?: number | null;
+  isFixed?: boolean | null;
 };
 
 export type WaitlistGroup = { category: string; events: EventRow[] };

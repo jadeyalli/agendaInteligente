@@ -32,17 +32,14 @@ import {
 import {
   dateToDateStringLocal,
   dateToTimeStringLocal,
-  debugDateFull,
   isoToDate,
   resolveBrowserTimezone,
 } from '@/lib/timezone';
 import {
   buildWaitlistGroups,
   KIND_LABELS,
-  WAITLIST_CATEGORY_ORDER,
   WAITLIST_WINDOW_LABELS,
   type EventRow,
-  type WaitlistGroup,
 } from '@/lib/waitlist-utils';
 
 export type ViewId = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'multiMonthYear';
@@ -77,17 +74,7 @@ type ModalInitialReminder = {
   timeEnd: string;
 };
 
-type ModalInitialTask = {
-  kind: 'TAREA';
-  title: string;
-  description: string;
-  category: string;
-  priority: PriorityCode;
-  repeat: 'NONE';
-  date: string;
-};
-
-type ModalInitial = ModalInitialEvent | ModalInitialTask | ModalInitialReminder;
+type ModalInitial = ModalInitialEvent | ModalInitialReminder;
 
 export default function Calendar({ onViewChange }: CalendarProps) {
   const { toast } = useToast();
@@ -667,10 +654,6 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
     : null;
   const durationForForm = directDuration && directDuration > 0 ? directDuration : inferredDuration;
 
-  // ✅ DEBUG
-  console.debug('START en mapRowToEditInitial', debugDateFull(startDate, timeZone));
-  console.debug('END en mapRowToEditInitial', debugDateFull(endDate, timeZone));
-
   return {
     kind: 'EVENTO',
     title: row.title,
@@ -679,7 +662,6 @@ function mapRowToEditInitial(row: EventRow, timeZone: string): ModalInitial | nu
     priority: (row.priority ?? 'RELEVANTE') as PriorityCode,
     repeat: 'NONE',
     window: 'NONE',
-    // ✅ CAMBIOS PRINCIPALES:
     date: dateToDateStringLocal(startDate, timeZone),
     timeStart: dateToTimeStringLocal(startDate, timeZone),
     timeEnd: dateToTimeStringLocal(endDate, timeZone),

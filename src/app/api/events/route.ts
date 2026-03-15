@@ -1,14 +1,5 @@
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
-import { getSessionUser } from '@/lib/session';
-import {
-  buildSchedulingContext,
-  isUnsetDate,
-  loadSchedulingPreferences,
-  preemptLowerPriorityEvents,
-  scheduleFlexibleEvents,
-} from '@/lib/scheduling-engine';
+
 import {
   AvailabilityWindow,
   Priority,
@@ -18,6 +9,17 @@ import {
   Prisma,
   Event,
 } from '@prisma/client';
+import { z } from 'zod';
+
+import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/session';
+import {
+  buildSchedulingContext,
+  isUnsetDate,
+  loadSchedulingPreferences,
+  preemptLowerPriorityEvents,
+  scheduleFlexibleEvents,
+} from '@/lib/scheduling-engine';
 
 const REMINDER_PRIORITY = 'RECORDATORIO' as unknown as Priority;
 

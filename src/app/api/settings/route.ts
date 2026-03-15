@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { type Prisma } from '@prisma/client';
+
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
 import {
@@ -156,7 +158,7 @@ export async function PATCH(req: Request) {
     ? sanitizeAvailabilitySlots(body.availabilitySlots, enabledDays)
     : null;
 
-  const operations: unknown[] = [
+  const operations: Prisma.PrismaPromise<unknown>[] = [
     prisma.userSettings.upsert({
       where: { userId: user.id },
       update: updatePayload,
@@ -180,8 +182,7 @@ export async function PATCH(req: Request) {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await prisma.$transaction(operations as any);
+  await prisma.$transaction(operations);
 
   const [record, savedSlots] = await Promise.all([
     prisma.userSettings.findUnique({ where: { userId: user.id } }),
