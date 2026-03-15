@@ -364,6 +364,8 @@ model CollabParticipant {
 
   /// Zona horaria del invitado para mostrar horarios en formato dual
   timezone String
+
+  @@index([collabEventId, userId])
 }
 
 /// Solicitud de reagendamiento iniciada por un invitado indispensable.
