@@ -80,7 +80,17 @@ beforeAll(async () => {
   state.userAId = userA.id;
   state.userBId = userB.id;
 
-  // Limpiar eventos colaborativos residuales de pruebas anteriores
+  // Limpiar eventos colaborativos residuales de pruebas anteriores.
+  // Primero recopilar localEventIds antes de borrar los participantes,
+  // para poder eliminar los eventos locales huérfanos creados por confirmSlot/acceptConfirmedSlot.
+  const orphanedParticipants = await prisma.collabParticipant.findMany({
+    where: { userId: { in: [state.userAId, state.userBId] } },
+    select: { localEventId: true },
+  });
+  const orphanedEventIds = orphanedParticipants
+    .map((p) => p.localEventId)
+    .filter((id): id is string => id !== null);
+
   await prisma.collaborativeEvent.deleteMany({
     where: { hostUserId: { in: [state.userAId] } },
   });
@@ -90,6 +100,11 @@ beforeAll(async () => {
   await prisma.phantomBlock.deleteMany({
     where: { userId: { in: [state.userAId, state.userBId] } },
   });
+
+  // Eliminar eventos locales huérfanos de ejecuciones anteriores del test
+  if (orphanedEventIds.length > 0) {
+    await prisma.event.deleteMany({ where: { id: { in: orphanedEventIds } } });
+  }
 }, 15_000);
 
 afterAll(async () => {
