@@ -239,6 +239,18 @@ export async function buildSolverPayload(
     // Excluir eventos completados y los que no participan en el agendamiento
     if (r.completed || !r.participatesInScheduling) continue;
 
+    // Eventos pasados (end < now) que no están completados → tratarlos como fijos
+    // para que el solver no los mueva ni los use como espacio disponible
+    if (r.end && new Date(r.end) < now && r.start) {
+      fixed.push({
+        id: r.id,
+        start: toLocalISO(new Date(r.start), tz),
+        end: toLocalISO(new Date(r.end), tz),
+        blocksCapacity: !r.canOverlap,
+      });
+      continue;
+    }
+
     const prio = mapPriorityToSolverCode(r.priority);
     const blocksCapacity = !r.canOverlap;
     const durationMin =
