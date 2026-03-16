@@ -1,7 +1,8 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Pencil, Trash2, Pin, PinOff, CheckCircle, Circle, CalendarDays } from 'lucide-react';
+import { useState } from 'react';
+import { X, Pencil, Trash2, Pin, PinOff, CheckCircle, Circle, CalendarDays, AlertTriangle } from 'lucide-react';
 
 interface DayEvent {
   id: string;
@@ -75,6 +76,9 @@ export default function DayActionsModal({
   onToggleFixed,
   onToggleCompleted,
 }: Props) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmCompleteId, setConfirmCompleteId] = useState<string | null>(null);
+
   const sorted = [...events].sort((a, b) => {
     if (!a.start) return 1;
     if (!b.start) return -1;
@@ -183,44 +187,80 @@ export default function DayActionsModal({
                             </p>
                           </div>
 
-                          {/* acciones */}
+                          {/* Confirmación de completar */}
+                        {confirmCompleteId === event.id && (
+                          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                            <p className="mb-1.5 text-xs text-emerald-800">Esta acción es irreversible. El evento quedará como historial.</p>
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => setConfirmCompleteId(null)}
+                                className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Cancelar</button>
+                              <button type="button" onClick={() => { setConfirmCompleteId(null); onToggleCompleted(event.id); }}
+                                className="rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-700">Confirmar</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Confirmación de eliminar */}
+                        {confirmDeleteId === event.id && (
+                          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2">
+                            <div className="mb-1.5 flex items-center gap-1 text-xs text-rose-700">
+                              <AlertTriangle className="h-3 w-3 shrink-0" />
+                              <span>Esta acción no se puede deshacer.</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => setConfirmDeleteId(null)}
+                                className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Cancelar</button>
+                              <button type="button" onClick={() => { setConfirmDeleteId(null); onDelete(event.id); }}
+                                className="rounded bg-rose-600 px-2 py-1 text-xs text-white hover:bg-rose-700">Eliminar</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* acciones */}
                           <div className="flex shrink-0 items-center gap-1">
-                            <button
-                              type="button"
-                              title={event.completed ? 'Marcar pendiente' : 'Marcar completado'}
-                              onClick={() => onToggleCompleted(event.id)}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-slate-100 hover:text-emerald-600"
-                            >
-                              {event.completed
-                                ? <CheckCircle className="h-4 w-4 text-emerald-500" />
-                                : <Circle className="h-4 w-4" />}
-                            </button>
-                            <button
-                              type="button"
-                              title={event.isFixed ? 'Desfijar' : 'Fijar'}
-                              onClick={() => onToggleFixed(event.id)}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-slate-100 hover:text-indigo-600"
-                            >
-                              {event.isFixed
-                                ? <PinOff className="h-4 w-4" />
-                                : <Pin className="h-4 w-4" />}
-                            </button>
-                            <button
-                              type="button"
-                              title="Editar"
-                              onClick={() => onEdit(event.id)}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-slate-100 hover:text-blue-600"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Eliminar"
-                              onClick={() => onDelete(event.id)}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-red-50 hover:text-red-600"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {!event.completed && (
+                              <button
+                                type="button"
+                                title="Marcar completado"
+                                onClick={() => setConfirmCompleteId(event.id)}
+                                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-slate-100 hover:text-emerald-600"
+                              >
+                                <Circle className="h-4 w-4" />
+                              </button>
+                            )}
+                            {event.completed && (
+                              <CheckCircle className="h-4 w-4 text-emerald-500 mx-1.5" />
+                            )}
+                            {!event.completed && (
+                              <>
+                                <button
+                                  type="button"
+                                  title={event.isFixed ? 'Desfijar' : 'Fijar'}
+                                  onClick={() => onToggleFixed(event.id)}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-slate-100 hover:text-indigo-600"
+                                >
+                                  {event.isFixed
+                                    ? <PinOff className="h-4 w-4" />
+                                    : <Pin className="h-4 w-4" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Editar"
+                                  onClick={() => onEdit(event.id)}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-slate-100 hover:text-blue-600"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Eliminar"
+                                  onClick={() => setConfirmDeleteId(event.id)}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-red-50 hover:text-red-600"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>

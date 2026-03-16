@@ -60,6 +60,7 @@ export default function EventPreviewModal({
   deleting?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [confirmingComplete, setConfirmingComplete] = useState(false);
 
   const priority = event?.priority ?? null;
   const badge =
@@ -71,6 +72,7 @@ export default function EventPreviewModal({
 
   function handleCloseReset() {
     setConfirming(false);
+    setConfirmingComplete(false);
     onClose();
   }
 
@@ -122,6 +124,34 @@ export default function EventPreviewModal({
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {/* Confirmación de completar */}
+            {confirmingComplete && (
+              <div className="border-b border-emerald-100 bg-emerald-50 px-5 py-3">
+                <p className="mb-2 text-sm font-medium text-emerald-800">
+                  ¿Marcar &apos;{event.title}&apos; como completado?
+                </p>
+                <p className="mb-3 text-xs text-emerald-700">
+                  Esta acción es irreversible. El evento saldrá del solver y no podrá editarse, fijarse, ni eliminarse. Quedará como historial.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                    onClick={() => setConfirmingComplete(false)}
+                    type="button"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700"
+                    onClick={() => { setConfirmingComplete(false); onToggleCompleted!(event.id); }}
+                    type="button"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Confirmación de borrado */}
             {confirming && (
@@ -180,20 +210,24 @@ export default function EventPreviewModal({
             {/* Footer */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t px-5 py-3">
               <div className="flex gap-2">
-                {onToggleCompleted && (
+                {onToggleCompleted && event.status !== 'COMPLETED' && (
                   <button
                     type="button"
                     className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-                    onClick={() => onToggleCompleted(event.id)}
-                    title={event.status === 'COMPLETED' ? 'Desmarcar completado' : 'Marcar como completado'}
+                    onClick={() => setConfirmingComplete(true)}
+                    title="Marcar como completado"
                   >
-                    {event.status === 'COMPLETED'
-                      ? <CheckCircle className="h-4 w-4 text-emerald-500" />
-                      : <Circle className="h-4 w-4" />}
-                    {event.status === 'COMPLETED' ? 'Completado' : 'Completar'}
+                    <Circle className="h-4 w-4" />
+                    Completar
                   </button>
                 )}
-                {onToggleFixed && (
+                {event.status === 'COMPLETED' && (
+                  <span className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700">
+                    <CheckCircle className="h-4 w-4 text-emerald-500" />
+                    Completado
+                  </span>
+                )}
+                {onToggleFixed && event.status !== 'COMPLETED' && (
                   <button
                     type="button"
                     className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
@@ -207,23 +241,25 @@ export default function EventPreviewModal({
                   </button>
                 )}
               </div>
-              <div className="flex gap-2">
-                <button
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-50"
-                  onClick={() => onEdit(event)}
-                >
-                  <Pencil className="h-4 w-4" />
-                  Editar
-                </button>
-                <button
-                  className="inline-flex items-center gap-2 rounded-xl border border-rose-600 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                  onClick={() => setConfirming(true)}
-                  disabled={deleting || confirming}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Eliminar
-                </button>
-              </div>
+              {event.status !== 'COMPLETED' && (
+                <div className="flex gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-50"
+                    onClick={() => onEdit(event)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-xl border border-rose-600 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                    onClick={() => setConfirming(true)}
+                    disabled={deleting || confirming}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Eliminar
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
         </motion.div>

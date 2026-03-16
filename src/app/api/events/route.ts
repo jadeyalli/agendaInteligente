@@ -166,6 +166,13 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
+    if (target.completed) {
+      return NextResponse.json(
+        { error: 'Los eventos completados no pueden eliminarse.' },
+        { status: 403 },
+      );
+    }
+
     if (cascade === 'series') {
       // si es master, borra master + hijas; si es hija, borra su master y la serie
       const masterId = target.originEventId ?? target.id;
@@ -209,6 +216,8 @@ const PatchSchema = z.object({
   // comportamiento
   participatesInScheduling: z.boolean().optional(),
   status: z.string().optional(),
+  completed: z.boolean().optional(),
+  completedAt: z.union([z.coerce.date(), z.null()]).optional(),
 
   // ventana
   window: z.nativeEnum(AvailabilityWindow).optional(),
@@ -232,6 +241,13 @@ export async function PATCH(req: Request) {
     const existing = await prisma.event.findUnique({ where: { id } });
     if (!existing || existing.userId !== user.id) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    if (existing.completed) {
+      return NextResponse.json(
+        { error: 'Los eventos completados no pueden modificarse.' },
+        { status: 403 },
+      );
     }
 
     const raw = await req.json().catch(() => ({}));
@@ -286,6 +302,8 @@ export async function PATCH(req: Request) {
         isFixed: data.isFixed,
         canOverlap: data.priority ? (data.priority === REMINDER_PRIORITY ? true : false) : undefined,
         status: data.status,
+        completed: data.completed,
+        completedAt: data.hasOwnProperty('completedAt') ? data.completedAt : undefined,
 
         window: data.window,
         windowStart: data.hasOwnProperty('windowStart') ? data.windowStart : undefined,
