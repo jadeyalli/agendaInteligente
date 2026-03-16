@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Clock } from 'lucide-react';
 
 /** Un slot libre de una hora completa. */
@@ -12,6 +13,7 @@ export interface AvailableSlot {
 interface Props {
   slots: AvailableSlot[];
   onSlotClick: (start: Date, end: Date) => void;
+  onSelectManually?: () => void;
   maxVisible?: number;
 }
 
@@ -25,20 +27,32 @@ function fmtTime(date: Date): string {
 }
 
 /**
- * Muestra hasta 8 slots libres de la semana actual (horas completas).
- * Es un apoyo visual para que el usuario identifique cuándo está libre
- * y como fuente de sugerencias al crear eventos colaborativos.
+ * Muestra slots libres dentro de los próximos 15 días.
+ * Muestra 8 por defecto con opción de expandir.
  */
-export default function AvailableSlots({ slots, onSlotClick, maxVisible = 8 }: Props) {
-  const visible = slots.slice(0, maxVisible);
+export default function AvailableSlots({ slots, onSlotClick, onSelectManually, maxVisible = 8 }: Props) {
+  const [expanded, setExpanded] = useState(false);
 
-  if (visible.length === 0) {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000);
+
+  const within15Days = slots.filter((s) => s.start >= now && s.start <= cutoff);
+  const visible = expanded ? within15Days : within15Days.slice(0, maxVisible);
+  const hasMore = within15Days.length > maxVisible;
+
+  if (within15Days.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
           <Clock className="h-5 w-5" />
         </div>
-        <p className="text-xs text-[var(--muted)]">Sin horas libres esta semana.</p>
+        <p className="text-xs text-[var(--muted)]">Sin horas libres en los próximos 15 días.</p>
+        {onSelectManually && (
+          <button type="button" onClick={onSelectManually}
+            className="mt-1 text-xs text-indigo-600 underline hover:text-indigo-700">
+            Prefiero seleccionar horario manualmente
+          </button>
+        )}
       </div>
     );
   }
@@ -58,6 +72,20 @@ export default function AvailableSlots({ slots, onSlotClick, maxVisible = 8 }: P
           </span>
         </button>
       ))}
+
+      {!expanded && hasMore && (
+        <button type="button" onClick={() => setExpanded(true)}
+          className="w-full pt-1 text-xs text-[var(--muted)] underline hover:text-[var(--fg)]">
+          Ver más ({within15Days.length - maxVisible} más)
+        </button>
+      )}
+
+      {onSelectManually && (
+        <button type="button" onClick={onSelectManually}
+          className="w-full pt-1 text-xs text-indigo-600 underline hover:text-indigo-700">
+          Prefiero seleccionar horario manualmente
+        </button>
+      )}
     </div>
   );
 }
