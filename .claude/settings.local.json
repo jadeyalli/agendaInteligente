@@ -38,7 +38,14 @@
       "Bash(cp input.json solver/tests/fixtures/caso_input_legacy.json)",
       "Bash(python -m pytest solver/tests/ -v --tb=short -q)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(grep -r \"SESSION_SECRET\\\\|NEXTAUTH\\\\|AUTH_SECRET\\\\|session\" /c/Users/jadey/proyecto-final/agenda-inteligente/src/app/api/auth/ --include=*.ts -l)",
+      "Bash(grep -r \"SESSION_SECRET\\\\|IRON_SESSION\\\\|iron-session\\\\|session\" /c/Users/jadey/proyecto-final/agenda-inteligente/src/ --include=*.ts -l)",
+      "Bash(grep -r \"SESSION_SECRET\\\\|NEXTAUTH_SECRET\\\\|AUTH_SECRET\" /c/Users/jadey/proyecto-final/agenda-inteligente/src/ --include=*.ts)",
+      "Bash(pytest solver/tests/ -v)",
+      "Bash(pytest solver/tests/ -v -k \"objective\")",
+      "Bash(npx eslint:*)",
+      "Bash(npx next:*)"
     ]
   }
 }
