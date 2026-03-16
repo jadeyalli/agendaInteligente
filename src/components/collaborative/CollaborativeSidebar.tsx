@@ -113,17 +113,21 @@ export default function CollaborativeSidebar({ isOpen, onClose, availableSlots, 
   }
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
+    <>
+      <AnimatePresence>
+        {isOpen && (
           <motion.div
+            key="collab-backdrop"
             className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
           />
+        )}
+        {isOpen && (
           <motion.aside
+            key="collab-sidebar"
             className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-[var(--surface)] shadow-xl"
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
@@ -248,8 +252,8 @@ export default function CollaborativeSidebar({ isOpen, onClose, availableSlots, 
               )}
             </div>
           </motion.aside>
-        </>
-      )}
+        )}
+      </AnimatePresence>
 
       <CreateCollaborativeModal
         isOpen={showCreate}
@@ -257,6 +261,6 @@ export default function CollaborativeSidebar({ isOpen, onClose, availableSlots, 
         onClose={() => setShowCreate(false)}
         onCreated={() => { setShowCreate(false); reload(); }}
       />
-    </AnimatePresence>
+    </>
   );
 }
