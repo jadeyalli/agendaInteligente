@@ -9,7 +9,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
-import { CalendarX2, Download, Sparkles } from 'lucide-react';
+import { CalendarX2, Download } from 'lucide-react';
 
 import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
@@ -19,6 +19,7 @@ import AvailableSlots, { type AvailableSlot } from '@/components/AvailableSlots'
 import DayActionsModal from '@/components/DayActionsModal';
 import SolverChangesPanel, { type SolverChanges } from '@/components/SolverChangesPanel';
 import CollaborativeSidebar from '@/components/collaborative/CollaborativeSidebar';
+import ReserveSpaceModal from '@/components/ReserveSpaceModal';
 import { useToast } from '@/components/ui/ToastProvider';
 import type { ValidatedSolverOutput } from '@/domain/solver-contract';
 
@@ -138,8 +139,16 @@ export default function Calendar({ onViewChange }: CalendarProps) {
 
   // datos del backend y rango visible
   const [rows, setRows] = useState<EventRow[]>([]);
+
+  // Evento seleccionado sincronizado con rows: refleja el estado más reciente sin cerrar el modal.
+  const selectedEvent = useMemo<PreviewRow | null>(() => {
+    if (!selected) return null;
+    const fresh = rows.find((r) => r.id === selected.id);
+    return fresh ? (fresh as unknown as PreviewRow) : selected;
+  }, [selected, rows]);
   const [loading, setLoading] = useState(false);
-  const [phantomBlocks, setPhantomBlocks] = useState<Array<{ id: string; collabEventId: string; start: string; end: string }>>([]);
+  const [phantomBlocks, setPhantomBlocks] = useState<Array<{ id: string; collabEventId?: string | null; start: string; end: string; title?: string | null }>>([]);
+  const [openReserveSpace, setOpenReserveSpace] = useState(false);
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
   const [enabledDayCodes, setEnabledDayCodes] = useState<DayCode[]>(
     DEFAULT_USER_SETTINGS.enabledDays,
@@ -520,6 +529,11 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         }
       }
       await loadEvents();
+
+      // Ejecutar solver automáticamente para eventos URGENTE/RELEVANTE
+      if (payload.kind === 'EVENTO' && (payload.priority === 'URGENTE' || payload.priority === 'RELEVANTE')) {
+        await handleSolveAgenda();
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error al crear';
       toast(message, 'error');
@@ -548,11 +562,15 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     try {
       const event = rows.find((r) => r.id === eventId);
       if (!event) return;
-      const isNowCompleted = event.status !== 'COMPLETED';
       const res = await fetch(`/api/events?id=${encodeURIComponent(eventId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: isNowCompleted ? 'COMPLETED' : 'SCHEDULED' }),
+        body: JSON.stringify({
+          completed: true,
+          completedAt: new Date().toISOString(),
+          isFixed: true,
+          status: 'COMPLETED',
+        }),
       });
       if (!res.ok) throw new Error('No se pudo actualizar');
       await loadEvents();
@@ -623,8 +641,11 @@ export default function Calendar({ onViewChange }: CalendarProps) {
         throw new Error((err as { error?: string }).error || 'Error al optimizar');
       }
       const output = (await res.json()) as ValidatedSolverOutput;
-      setSolverOutput(output);
-      setSolverChanges(enrichSolverOutput(output));
+      // Solo mostrar el panel si hay eventos que se deben mover
+      if (output.moved && output.moved.length > 0) {
+        setSolverOutput(output);
+        setSolverChanges(enrichSolverOutput(output));
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error al optimizar';
       toast(message, 'error');
@@ -835,6 +856,26 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======
+  /** Calcula cuántos eventos del día tienen hora fuera del rango visible (dayStart–dayEnd). */
+  const hiddenEventsByDay = useMemo<Map<string, number>>(() => {
+    const map = new Map<string, number>();
+    const [startH, startM] = userDayStart.split(':').map(Number);
+    const [endH, endM] = userDayEnd.split(':').map(Number);
+    const startTotal = startH * 60 + startM;
+    const endTotal = endH * 60 + endM;
+
+    for (const row of rows) {
+      if (!row.start || row.status === 'WAITLIST' || row.isAllDay) continue;
+      const d = new Date(row.start);
+      const eventMinutes = d.getHours() * 60 + d.getMinutes();
+      if (eventMinutes < startTotal || eventMinutes >= endTotal) {
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        map.set(key, (map.get(key) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [rows, userDayStart, userDayEnd]);
+
   const fcEvents = useMemo<EventInput[]>(() => {
     const out: EventInput[] = [];
 
@@ -999,16 +1040,18 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
       }
     }
 
-    // Bloques fantasma: reservas de eventos colaborativos (borde punteado, fondo rayado)
+    // Bloques fantasma: colaborativos o manuales (borde punteado, fondo rayado)
     for (const phantom of phantomBlocks) {
+      const isManual = !phantom.collabEventId;
+      const defaultTitle = isManual ? 'Espacio reservado' : 'Reservado (colaborativo)';
       out.push({
         id: `phantom_${phantom.id}`,
-        title: 'Reservado (colaborativo)',
+        title: phantom.title ?? defaultTitle,
         start: phantom.start,
         end: phantom.end,
         classNames: ['phantom-block'],
         editable: false,
-        extendedProps: { isPhantom: true, collabEventId: phantom.collabEventId },
+        extendedProps: { isPhantom: true, isManualPhantom: isManual, phantomId: phantom.id, collabEventId: phantom.collabEventId },
       });
     }
 
@@ -1132,15 +1175,13 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
             >
               Lista del día
             </button>
-            <button
-              className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200/70 bg-indigo-50/70 px-5 py-2 text-sm font-semibold text-indigo-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-100 disabled:opacity-60"
-              onClick={handleSolveAgenda}
+<button
+              className="inline-flex items-center rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+              onClick={() => setOpenReserveSpace(true)}
               type="button"
-              disabled={solvingAgenda || acceptingChanges}
-              title="Optimizar agenda automáticamente"
+              title="Reservar un bloque de tiempo en tu agenda"
             >
-              <Sparkles className="h-3.5 w-3.5" />
-              {solvingAgenda ? 'Optimizando…' : 'Optimizar'}
+              Reservar espacio
             </button>
             <button
               className="inline-flex items-center rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-60"
@@ -1230,6 +1271,25 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                     multiMonthYear: { type: 'multiMonth', duration: { years: 1 }, multiMonthMaxColumns: 4 },
                   }}
                   dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
+                  dayHeaderContent={(arg) => {
+                    const d = arg.date;
+                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    const hidden = hiddenEventsByDay.get(key) ?? 0;
+                    return (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span>{arg.text}</span>
+                        {hidden > 0 && (
+                          <button
+                            type="button"
+                            className="text-[10px] text-[var(--muted)] underline hover:text-[var(--fg)]"
+                            onClick={(e) => { e.stopPropagation(); handleOpenDayActions(d); }}
+                          >
+                            {hidden} evento{hidden > 1 ? 's' : ''} fuera del horario visible
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }}
                   slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
                   weekNumberCalculation="ISO"
 
@@ -1544,7 +1604,7 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
       {/* Vista previa */}
       <EventPreviewModal
         open={openPreview}
-        event={selected}
+        event={selectedEvent}
         deleting={deleting}
         onClose={() => { setOpenPreview(false); setSelected(null); }}
         onEdit={(e) => {
@@ -1615,6 +1675,12 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
           </div>
         </div>
       )}
+
+      <ReserveSpaceModal
+        open={openReserveSpace}
+        onClose={() => setOpenReserveSpace(false)}
+        onCreated={() => { setOpenReserveSpace(false); loadPhantomBlocks(); }}
+      />
     </div>
   );
 }
