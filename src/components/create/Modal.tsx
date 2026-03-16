@@ -262,7 +262,7 @@ const defaultEvent = (): EventForm => ({
   title: "",
   description: "",
   category: "",
-  priority: "RELEVANTE",
+  priority: "CRITICA",
   repeat: "NONE",
   window: "SEMANA",
   windowStart: "",
@@ -642,10 +642,17 @@ const CrearRecordatorio: React.FC<{
 
   useEffect(() => { set((prev) => ({ ...prev, ...initReminder })); }, [initReminder]);
 
+  const reminderTimeError: string | null = (() => {
+    if (f.isAllDay || !f.timeStart || !f.timeEnd) return null;
+    if (f.timeEnd <= f.timeStart) return "La hora de fin debe ser posterior a la hora de inicio.";
+    return null;
+  })();
+
   const canSubmit =
     f.title.trim().length > 0 &&
     Boolean(f.date) &&
-    (f.isAllDay || Boolean(f.timeStart));
+    (f.isAllDay || Boolean(f.timeStart)) &&
+    reminderTimeError === null;
 
   return (
     <div className="space-y-4">
@@ -695,14 +702,19 @@ const CrearRecordatorio: React.FC<{
         </Row>
 
         {!f.isAllDay && (
-          <Row>
-            <Field label="Hora inicio" labelIcon={<Clock className="h-3.5 w-3.5" />} required>
-              <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
-            </Field>
-            <Field label="Hora fin (opcional)" labelIcon={<Clock className="h-3.5 w-3.5" />}>
-              <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
-            </Field>
-          </Row>
+          <>
+            <Row>
+              <Field label="Hora inicio" labelIcon={<Clock className="h-3.5 w-3.5" />} required>
+                <Input type="time" step="300" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              </Field>
+              <Field label="Hora fin (opcional)" labelIcon={<Clock className="h-3.5 w-3.5" />}>
+                <Input type="time" step="300" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              </Field>
+            </Row>
+            {reminderTimeError && (
+              <p className="text-xs text-red-500">{reminderTimeError}</p>
+            )}
+          </>
         )}
 
         <Field label="Repetición" labelIcon={<RepeatIcon className="h-3.5 w-3.5" />}>
