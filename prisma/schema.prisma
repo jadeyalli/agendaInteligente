@@ -380,15 +380,17 @@ model CollabRescheduleRequest {
   createdAt DateTime @default(now())
 }
 
-/// Bloque temporal en la agenda del usuario que reserva capacidad durante la negociación.
-/// Actúa como evento fijo en el solver (restricción R7). Se elimina al confirmar o cancelar.
+/// Bloque temporal en la agenda del usuario que reserva capacidad durante la negociación
+/// colaborativa o manualmente. Actúa como evento fijo en el solver (restricción R7).
 model PhantomBlock {
-  id            String @id @default(cuid())
+  id            String   @id @default(cuid())
   userId        String
-  collabEventId String
+  collabEventId String?
   start         DateTime
   end           DateTime
-  isActive      Boolean @default(true)
+  isActive      Boolean  @default(true)
+  title         String?
+  reason        String?
 
   @@index([userId, isActive])
 }
