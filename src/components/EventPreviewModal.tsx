@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Pencil, Trash2, Tag, Flag, AlertTriangle } from 'lucide-react';
+import { X, Pencil, Trash2, Tag, Flag, AlertTriangle, Pin, PinOff, CheckCircle, Circle } from 'lucide-react';
 import React, { useState } from 'react';
 
 export type EventRow = {
@@ -17,6 +17,9 @@ export type EventRow = {
   isAllDay?: boolean | null;
   dueDate?: string | null;
   durationMinutes?: number | null;
+
+  isFixed?: boolean | null;
+  status?: string | null;
 };
 
 const badgeByPriority: Record<NonNullable<EventRow['priority']>, string> = {
@@ -43,6 +46,8 @@ export default function EventPreviewModal({
   onClose,
   onEdit,
   onDelete,
+  onToggleFixed,
+  onToggleCompleted,
   deleting = false,
 }: {
   open: boolean;
@@ -50,6 +55,8 @@ export default function EventPreviewModal({
   onClose: () => void;
   onEdit: (e: EventRow) => void;
   onDelete: (e: EventRow) => void;
+  onToggleFixed?: (id: string) => void;
+  onToggleCompleted?: (id: string) => void;
   deleting?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -171,9 +178,34 @@ export default function EventPreviewModal({
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between gap-2 border-t px-5 py-3">
-              <div className="text-xs text-slate-500">
-                {event.kind === 'EVENTO' ? 'Evento' : event.kind === 'TAREA' ? 'Tarea' : 'Solicitud'}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-5 py-3">
+              <div className="flex gap-2">
+                {onToggleCompleted && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => onToggleCompleted(event.id)}
+                    title={event.status === 'COMPLETED' ? 'Desmarcar completado' : 'Marcar como completado'}
+                  >
+                    {event.status === 'COMPLETED'
+                      ? <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      : <Circle className="h-4 w-4" />}
+                    {event.status === 'COMPLETED' ? 'Completado' : 'Completar'}
+                  </button>
+                )}
+                {onToggleFixed && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => onToggleFixed(event.id)}
+                    title={event.isFixed ? 'Desfijar evento' : 'Fijar evento'}
+                  >
+                    {event.isFixed
+                      ? <PinOff className="h-4 w-4 text-indigo-500" />
+                      : <Pin className="h-4 w-4" />}
+                    {event.isFixed ? 'Fijado' : 'Fijar'}
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 <button

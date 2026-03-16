@@ -9,7 +9,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
-import { CalendarX2, Download } from 'lucide-react';
+import { CalendarX2, Download, Sparkles } from 'lucide-react';
 
 import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
 import IcsImportModal from '@/components/ics/IcsImportModal';
@@ -17,7 +17,10 @@ import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/Eve
 import OptionalEventsPanel from '@/components/OptionalEventsPanel';
 import AvailableSlots, { type AvailableSlot } from '@/components/AvailableSlots';
 import DayActionsModal from '@/components/DayActionsModal';
+import SolverChangesPanel, { type SolverChanges } from '@/components/SolverChangesPanel';
+import CollaborativeSidebar from '@/components/collaborative/CollaborativeSidebar';
 import { useToast } from '@/components/ui/ToastProvider';
+import type { ValidatedSolverOutput } from '@/domain/solver-contract';
 
 import { THEMES, currentTheme } from '@/theme/themes';
 import {
@@ -107,10 +110,26 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [openImport, setOpenImport] = useState(false);
+  // Estado para conflictos de eventos críticos
+  const [criticalConflict, setCriticalConflict] = useState<{
+    pendingPayload: CreateModalSubmitPayload;
+    conflictingEvents: Array<{ id: string; title: string; start: string; end: string }>;
+  } | null>(null);
+
   const [openOptionalPanel, setOpenOptionalPanel] = useState(false);
   const [openDayActions, setOpenDayActions] = useState(false);
   const [dayActionsDate, setDayActionsDate] = useState<Date>(new Date());
   const [showCompleted, setShowCompleted] = useState(true);
+
+  // ID del usuario actual (para colaborativos)
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [openCollaborative, setOpenCollaborative] = useState(false);
+
+  // Solver changes panel state
+  const [solverOutput, setSolverOutput] = useState<ValidatedSolverOutput | null>(null);
+  const [solverChanges, setSolverChanges] = useState<SolverChanges | null>(null);
+  const [solvingAgenda, setSolvingAgenda] = useState(false);
+  const [acceptingChanges, setAcceptingChanges] = useState(false);
 
   // Vista previa
   const [openPreview, setOpenPreview] = useState(false);
@@ -173,7 +192,14 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     }
   }
 
-  useEffect(() => { loadEvents(); loadPhantomBlocks(); }, []);
+  useEffect(() => {
+    loadEvents();
+    loadPhantomBlocks();
+    fetch('/api/auth/me')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { id?: string } | null) => { if (data?.id) setCurrentUserId(data.id); })
+      .catch(() => {});
+  }, []);
 
   async function loadPhantomBlocks() {
     try {
@@ -403,19 +429,31 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   };
 
   // ====== Crear desde el modal ======
-  async function handleCreateFromModal(payload: CreateModalSubmitPayload) {
+  async function handleCreateFromModal(payload: CreateModalSubmitPayload, forceOverlap = false) {
     try {
       setCreating(true);
+      const body = forceOverlap ? { ...payload, forceOverlap: true } : payload;
       const res = await fetch('/api/events', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (res.status === 401) {
         window.location.href = '/login';
         return;
       }
+      if (res.status === 409) {
+        const conflictData = await res.json().catch(() => ({}));
+        if (conflictData.conflict) {
+          setCriticalConflict({
+            pendingPayload: payload,
+            conflictingEvents: conflictData.conflictingEvents ?? [],
+          });
+          return;
+        }
+        throw new Error(conflictData.error || 'Conflicto de horario');
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'No se pudo crear');
+        throw new Error((err as { error?: string }).error || 'No se pudo crear');
       }
       const created = await res.json().catch(() => ({ items: [] }));
       const items: Array<{ status?: string; priority?: string }> = Array.isArray(created?.items) ? created.items : [];
@@ -521,6 +559,108 @@ export default function Calendar({ onViewChange }: CalendarProps) {
     } catch {
       toast('No se pudo actualizar el evento.', 'error');
     }
+  }
+
+  /** Enriquece el output del solver con títulos y fromEnd/toEnd desde rows */
+  function enrichSolverOutput(output: ValidatedSolverOutput): SolverChanges {
+    const rowMap = new Map(rows.map((r) => [r.id, r]));
+
+    const placed = output.placed.map((p) => {
+      const row = rowMap.get(p.id);
+      return {
+        id: p.id,
+        title: row?.title ?? p.id,
+        start: p.start,
+        end: p.end,
+      };
+    });
+
+    const moved = output.moved.map((m) => {
+      const row = rowMap.get(m.id);
+      const fromStartMs = m.fromStart ? new Date(m.fromStart).getTime() : null;
+      const fromEndMs = row?.end ? new Date(row.end).getTime() : null;
+      const toStartMs = new Date(m.toStart).getTime();
+      const duration = fromStartMs != null && fromEndMs != null ? fromEndMs - fromStartMs : 60 * 60 * 1000;
+      const toEndMs = toStartMs + duration;
+
+      return {
+        id: m.id,
+        title: row?.title ?? m.id,
+        fromStart: m.fromStart,
+        fromEnd: row?.end ?? null,
+        toStart: m.toStart,
+        toEnd: new Date(toEndMs).toISOString(),
+        reason: m.reason,
+      };
+    });
+
+    const unplaced = output.unplaced.map((u) => {
+      const row = rowMap.get(u.id);
+      return {
+        id: u.id,
+        title: row?.title ?? u.id,
+        reason: u.reason,
+      };
+    });
+
+    return { placed, moved, unplaced };
+  }
+
+  async function handleSolveAgenda() {
+    try {
+      setSolvingAgenda(true);
+      const res = await fetch('/api/schedule/solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || 'Error al optimizar');
+      }
+      const output = (await res.json()) as ValidatedSolverOutput;
+      setSolverOutput(output);
+      setSolverChanges(enrichSolverOutput(output));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al optimizar';
+      toast(message, 'error');
+    } finally {
+      setSolvingAgenda(false);
+    }
+  }
+
+  async function handleAcceptSolverChanges() {
+    if (!solverOutput) return;
+    try {
+      setAcceptingChanges(true);
+      const res = await fetch('/api/schedule/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(solverOutput),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || 'Error al aplicar cambios');
+      }
+      setSolverOutput(null);
+      setSolverChanges(null);
+      toast('Cambios aplicados correctamente.', 'success');
+      await loadEvents();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error al aplicar cambios';
+      toast(message, 'error');
+    } finally {
+      setAcceptingChanges(false);
+    }
+  }
+
+  function handleCancelSolverChanges() {
+    setSolverOutput(null);
+    setSolverChanges(null);
   }
 
   function handleOpenDayActions(date: Date) {
@@ -993,6 +1133,16 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               Lista del día
             </button>
             <button
+              className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200/70 bg-indigo-50/70 px-5 py-2 text-sm font-semibold text-indigo-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-100 disabled:opacity-60"
+              onClick={handleSolveAgenda}
+              type="button"
+              disabled={solvingAgenda || acceptingChanges}
+              title="Optimizar agenda automáticamente"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {solvingAgenda ? 'Optimizando…' : 'Optimizar'}
+            </button>
+            <button
               className="inline-flex items-center rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-60"
               onClick={() => {
                 waitlistPromoteRef.current = null;
@@ -1004,6 +1154,14 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
               disabled={creating}
             >
               {creating ? 'Creando…' : 'Crear evento'}
+            </button>
+            <button
+              className="inline-flex items-center rounded-full border border-indigo-200/70 bg-indigo-50/70 px-5 py-2 text-sm font-semibold text-indigo-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-indigo-100"
+              onClick={() => setOpenCollaborative(true)}
+              type="button"
+              title="Ver eventos colaborativos y solicitudes"
+            >
+              Colaborativos
             </button>
             <button
               className="inline-flex items-center rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
@@ -1023,6 +1181,16 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
           </div>
         </div>
       </header>
+
+      {solverChanges && (
+        <SolverChangesPanel
+          isVisible={!!solverChanges}
+          changes={solverChanges}
+          onAccept={handleAcceptSolverChanges}
+          onCancel={handleCancelSolverChanges}
+          accepting={acceptingChanges}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-[var(--surface)]/90 shadow-sm">
@@ -1090,12 +1258,37 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                     return () => el.removeEventListener('click', handler);
                   }}
                   dateClick={(arg) => {
-                    api()?.changeView('timeGridDay', arg.date);
-                    setView('timeGridDay');
+                    // En vista mes/año: navegar al día. En vista día/semana: abrir crear evento
+                    if (view === 'dayGridMonth' || view === 'multiMonthYear') {
+                      api()?.changeView('timeGridDay', arg.date);
+                      setView('timeGridDay');
+                      return;
+                    }
+                    // Redondear minutos al múltiplo de 5 más cercano
+                    const d = arg.date;
+                    const roundedMin = Math.round(d.getMinutes() / 5) * 5;
+                    const start = new Date(d);
+                    start.setMinutes(roundedMin, 0, 0);
+                    const end = new Date(start.getTime() + 30 * 60 * 1000);
+                    waitlistPromoteRef.current = null;
+                    setWaitlistPromotingId(null);
+                    setCreateInitial({
+                      kind: 'EVENTO',
+                      title: '',
+                      description: '',
+                      category: '',
+                      priority: 'RELEVANTE',
+                      repeat: 'NONE',
+                      window: 'NONE',
+                      date: dateToDateStringLocal(start, browserTimeZone),
+                      timeStart: dateToTimeStringLocal(start, browserTimeZone),
+                      timeEnd: dateToTimeStringLocal(end, browserTimeZone),
+                      durationHours: '0',
+                    });
+                    setOpenCreate(true);
                   }}
                   navLinkDayClick={(date) => {
-                    api()?.changeView('timeGridDay', date);
-                    setView('timeGridDay');
+                    handleOpenDayActions(date);
                   }}
                   datesSet={({ view: v, start, end }) => {
                     const vtype = v.type as ViewId;
@@ -1367,7 +1560,61 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
           setOpenEdit(true);
         }}
         onDelete={(e) => { void handleDelete(e); }}
+        onToggleFixed={(id) => { void handleToggleFixed(id); }}
+        onToggleCompleted={(id) => { void handleToggleCompleted(id); }}
       />
+
+      {/* Panel de colaborativos */}
+      <CollaborativeSidebar
+        isOpen={openCollaborative}
+        onClose={() => setOpenCollaborative(false)}
+        availableSlots={availableSlots}
+        currentUserId={currentUserId}
+      />
+
+      {/* Diálogo de conflicto de evento crítico */}
+      {criticalConflict && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setCriticalConflict(null)} />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="mb-2 text-base font-semibold text-slate-900">Solapamiento con evento crítico</h2>
+            <p className="mb-3 text-sm text-slate-700">
+              Este horario se solapa con los siguientes eventos críticos:
+            </p>
+            <ul className="mb-4 space-y-1">
+              {criticalConflict.conflictingEvents.map((ev) => (
+                <li key={ev.id} className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  <span className="font-medium">{ev.title}</span>{' '}
+                  <span className="text-rose-600">
+                    ({new Date(ev.start).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} –{' '}
+                    {new Date(ev.end).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })})
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                onClick={async () => {
+                  const payload = criticalConflict.pendingPayload;
+                  setCriticalConflict(null);
+                  await handleCreateFromModal(payload, true);
+                }}
+              >
+                Sobreponer de todos modos
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                onClick={() => setCriticalConflict(null)}
+              >
+                Cambiar horario
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

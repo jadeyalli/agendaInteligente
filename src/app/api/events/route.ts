@@ -810,6 +810,40 @@ async function createReminderSeries(
   return [master, ...children];
 }
 
+/**
+ * Detecta si un nuevo evento crítico se solapa con otros críticos existentes.
+ * Solapamiento: eventStart < end AND eventEnd > start
+ */
+async function detectCriticalConflicts(
+  userId: string,
+  start: Date,
+  end: Date,
+  excludeEventId?: string,
+): Promise<Array<{ id: string; title: string; start: Date; end: Date }>> {
+  const where: {
+    userId: string;
+    priority: Priority;
+    start: { lt: Date };
+    end: { gt: Date };
+    id?: { not: string };
+  } = {
+    userId,
+    priority: 'CRITICA' as Priority,
+    start: { lt: end },
+    end: { gt: start },
+  };
+  if (excludeEventId) {
+    where.id = { not: excludeEventId };
+  }
+  const conflicts = await prisma.event.findMany({
+    where,
+    select: { id: true, title: true, start: true, end: true },
+  });
+  return conflicts
+    .filter((c) => c.start != null && c.end != null)
+    .map((c) => ({ id: c.id, title: c.title, start: c.start as Date, end: c.end as Date }));
+}
+
 /** ================== handlers ================== */
 export async function POST(req: Request) {
   try {
@@ -849,6 +883,40 @@ export async function POST(req: Request) {
       }
 
       calendarIdToUse = calendar.id;
+    }
+
+    // Detección de conflictos para eventos CRÍTICOS
+    if (
+      data.kind === 'EVENTO' &&
+      data.priority === 'CRITICA' &&
+      data.start &&
+      !isUnsetDate(data.start as Date) &&
+      data.end &&
+      !isUnsetDate(data.end as Date)
+    ) {
+      const forceOverlap = (raw as Record<string, unknown>).forceOverlap === true;
+      if (!forceOverlap) {
+        const conflicts = await detectCriticalConflicts(
+          user.id,
+          data.start as Date,
+          data.end as Date,
+        );
+        if (conflicts.length > 0) {
+          return NextResponse.json(
+            {
+              conflict: true,
+              conflictingEvents: conflicts.map((c) => ({
+                id: c.id,
+                title: c.title,
+                start: c.start.toISOString(),
+                end: c.end.toISOString(),
+              })),
+              message: 'Este horario se solapa con eventos críticos existentes.',
+            },
+            { status: 409 },
+          );
+        }
+      }
     }
 
     let items: Event[];

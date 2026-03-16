@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import {
   DAY_CODES,
@@ -44,6 +44,8 @@ function clampBufferMinutes(value: string, fallback: number): number {
   return Math.round(rounded / 5) * 5;
 }
 
+const DEFAULT_CATEGORIES = ['Trabajo', 'Escuela', 'Personal'];
+
 export default function SettingsForm({ initialValues, initialSlots }: SettingsFormProps) {
   const [form, setForm] = useState<UserSettingsValues>(initialValues);
   const [slots, setSlots] = useState<SlotMap>(() => slotsArrayToMap(initialSlots));
@@ -53,6 +55,74 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
   const [savedOnce, setSavedOnce] = useState(false);
   const [reoptStatus, setReoptStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [reoptMessage, setReoptMessage] = useState<string | null>(null);
+
+  // Categorias
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [newCategory, setNewCategory] = useState('');
+  const [catSaving, setCatSaving] = useState(false);
+  const [catMessage, setCatMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/categories')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (Array.isArray(data?.categories) && data.categories.length > 0) {
+          setCategories(data.categories);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function handleSaveCategories() {
+    setCatSaving(true);
+    setCatMessage(null);
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categories }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error || 'Error al guardar');
+      }
+      setCatMessage('Categorias guardadas.');
+    } catch (e) {
+      setCatMessage(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setCatSaving(false);
+    }
+  }
+
+  function addCategory() {
+    const trimmed = newCategory.trim();
+    if (!trimmed || categories.includes(trimmed) || categories.length >= 5) return;
+    setCategories((prev) => [...prev, trimmed]);
+    setNewCategory('');
+  }
+
+  function removeCategory(idx: number) {
+    if (categories.length <= 2) return;
+    setCategories((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function moveCategoryUp(idx: number) {
+    if (idx === 0) return;
+    setCategories((prev) => {
+      const next = [...prev];
+      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      return next;
+    });
+  }
+
+  function moveCategoryDown(idx: number) {
+    setCategories((prev) => {
+      if (idx >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      return next;
+    });
+  }
 
   const enabledSet = useMemo(() => new Set(form.enabledDays), [form.enabledDays]);
 
@@ -160,17 +230,78 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
   }
 
   return (
+    <div className="space-y-8">
+      {/* ── Categorías ── */}
+      <section className="space-y-3 rounded-3xl border border-slate-200/70 bg-[var(--surface)]/80 p-6 shadow-sm">
+        <header className="space-y-1">
+          <h2 className="text-lg font-semibold text-[var(--fg)]">Categorias</h2>
+          <p className="text-sm text-[var(--muted)]">
+            Define entre 2 y 5 categorias. La primera tiene mayor prioridad. Arrastra o usa las flechas para reordenar.
+          </p>
+        </header>
+        <div className="space-y-2">
+          {categories.map((cat, idx) => (
+            <div key={cat} className="flex items-center gap-2 rounded-xl border border-slate-200/70 bg-white/70 px-3 py-2 text-sm">
+              <span className="flex-1 font-medium text-[var(--fg)]">{cat}</span>
+              <span className="text-xs text-[var(--muted)]">#{idx + 1}</span>
+              <button type="button" onClick={() => moveCategoryUp(idx)} disabled={idx === 0}
+                className="rounded px-1.5 py-0.5 text-xs text-[var(--muted)] disabled:opacity-30 hover:bg-slate-100">
+                ↑
+              </button>
+              <button type="button" onClick={() => moveCategoryDown(idx)} disabled={idx === categories.length - 1}
+                className="rounded px-1.5 py-0.5 text-xs text-[var(--muted)] disabled:opacity-30 hover:bg-slate-100">
+                ↓
+              </button>
+              <button type="button" onClick={() => removeCategory(idx)} disabled={categories.length <= 2}
+                className="rounded px-1.5 py-0.5 text-xs text-rose-500 disabled:opacity-30 hover:bg-rose-50">
+                Eliminar
+              </button>
+            </div>
+          ))}
+        </div>
+        {categories.length < 5 && (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } }}
+              placeholder="Nueva categoria"
+              maxLength={40}
+              className="flex-1 rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+            />
+            <button type="button" onClick={addCategory} disabled={!newCategory.trim()}
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-slate-800">
+              Agregar
+            </button>
+          </div>
+        )}
+        {catMessage && (
+          <p className={`text-sm ${catMessage.startsWith('Error') ? 'text-rose-600' : 'text-emerald-700'}`}>
+            {catMessage}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <button type="button" onClick={handleSaveCategories} disabled={catSaving}
+            className="inline-flex items-center rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60">
+            {catSaving ? 'Guardando…' : 'Guardar categorias'}
+          </button>
+        </div>
+      </section>
+
     <form
       onSubmit={handleSubmit}
       className="space-y-8 rounded-3xl border border-slate-200/70 bg-[var(--surface)]/80 p-6 shadow-sm"
     >
-      {/* Horario del día */}
+      {/* Horario del día — solo visual */}
       <section className="space-y-3">
         <header className="space-y-1">
-          <h2 className="text-lg font-semibold text-[var(--fg)]">Horario del día</h2>
+          <h2 className="text-lg font-semibold text-[var(--fg)]">Horario del dia (solo vista)</h2>
           <p className="text-sm text-[var(--muted)]">
-            Define el rango horario que se mostrará destacado en el calendario y que el solver
-            priorizará por omisión.
+            Define el rango horario que se mostrara destacado en el calendario.
+          </p>
+          <p className="text-xs text-amber-600">
+            Este horario solo afecta la vista del calendario, no el agendamiento automatico.
           </p>
         </header>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -417,116 +548,6 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
           </div>
         </div>
 
-        {/* Urgencia de eventos */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-[var(--fg)]">Urgencia de eventos</p>
-          <p className="text-xs text-[var(--muted)]">
-            ¿Qué tan pronto deben quedar agendados los eventos pendientes?
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                [1, 'Relajado', 'Cuando haya espacio libre'],
-                [2, 'Balanceado', 'Pronto, pero flexible'],
-                [3, 'Inmediato', 'Lo antes posible'],
-              ] as const
-            ).map(([level, label, desc]) => (
-              <label
-                key={level}
-                className={`flex cursor-pointer flex-col gap-0.5 rounded-2xl border px-3 py-2.5 text-sm transition hover:-translate-y-0.5 ${
-                  form.weightUrgency === level
-                    ? 'border-indigo-400 bg-indigo-50/70 text-indigo-700'
-                    : 'border-slate-200/70 bg-white/70 text-[var(--fg)]'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="weightUrgency"
-                  value={level}
-                  checked={form.weightUrgency === level}
-                  onChange={() => setForm((prev) => ({ ...prev, weightUrgency: level }))}
-                  className="sr-only"
-                />
-                <span className="font-medium">{label}</span>
-                <span className="text-xs text-[var(--muted)]">{desc}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Horario laboral */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-[var(--fg)]">Horario laboral</p>
-          <p className="text-xs text-[var(--muted)]">
-            ¿Qué tan importante es mantener eventos dentro del horario definido?
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                [1, 'Flexible', 'Puede salirse del horario'],
-                [2, 'Preferido', 'Prefiere el horario definido'],
-                [3, 'Estricto', 'Solo dentro del horario'],
-              ] as const
-            ).map(([level, label, desc]) => (
-              <label
-                key={level}
-                className={`flex cursor-pointer flex-col gap-0.5 rounded-2xl border px-3 py-2.5 text-sm transition hover:-translate-y-0.5 ${
-                  form.weightWorkHours === level
-                    ? 'border-indigo-400 bg-indigo-50/70 text-indigo-700'
-                    : 'border-slate-200/70 bg-white/70 text-[var(--fg)]'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="weightWorkHours"
-                  value={level}
-                  checked={form.weightWorkHours === level}
-                  onChange={() => setForm((prev) => ({ ...prev, weightWorkHours: level }))}
-                  className="sr-only"
-                />
-                <span className="font-medium">{label}</span>
-                <span className="text-xs text-[var(--muted)]">{desc}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Cruzar días */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-[var(--fg)]">Cruzar días</p>
-          <p className="text-xs text-[var(--muted)]">
-            ¿Puede el solver extender un evento al día siguiente si no cabe en uno solo?
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                [1, 'Permitido', 'Puede cruzar días'],
-                [2, 'Evitarlo', 'Prefiere no cruzar días'],
-                [3, 'Nunca', 'Nunca cruzar días'],
-              ] as const
-            ).map(([level, label, desc]) => (
-              <label
-                key={level}
-                className={`flex cursor-pointer flex-col gap-0.5 rounded-2xl border px-3 py-2.5 text-sm transition hover:-translate-y-0.5 ${
-                  form.weightCrossDay === level
-                    ? 'border-indigo-400 bg-indigo-50/70 text-indigo-700'
-                    : 'border-slate-200/70 bg-white/70 text-[var(--fg)]'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="weightCrossDay"
-                  value={level}
-                  checked={form.weightCrossDay === level}
-                  onChange={() => setForm((prev) => ({ ...prev, weightCrossDay: level }))}
-                  className="sr-only"
-                />
-                <span className="font-medium">{label}</span>
-                <span className="text-xs text-[var(--muted)]">{desc}</span>
-              </label>
-            ))}
-          </div>
-        </div>
       </section>
 
       {(message || error) && (
@@ -596,5 +617,6 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
         </button>
       </div>
     </form>
+    </div>
   );
 }

@@ -200,7 +200,7 @@ const Textarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = (p
 
 /* ── Selector de duración (h + min) ── */
 const HOUR_OPTIONS = Array.from({ length: 13 }, (_, i) => i); // 0–12
-const MIN_OPTIONS = [0, 15, 30, 45];
+const MIN_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
 const DurationPicker: React.FC<{
   hours: string;
@@ -437,11 +437,19 @@ const CrearEvento: React.FC<{
     return null;
   })();
 
+  const timeOrderError: string | null = (() => {
+    if (!isCritica && !isReminder) return null;
+    if (!f.timeStart || !f.timeEnd) return null;
+    if (f.timeEnd <= f.timeStart) return "La hora de fin debe ser posterior a la hora de inicio.";
+    return null;
+  })();
+
   const canSubmit =
     f.title.trim().length > 0 &&
     (!isCritica || (f.date && f.timeStart && f.timeEnd)) &&
     hasDuration &&
-    rangeError === null;
+    rangeError === null &&
+    timeOrderError === null;
 
   return (
     <div className="space-y-4">
@@ -488,11 +496,10 @@ const CrearEvento: React.FC<{
             set(next);
           }}
         >
-          <option value="CRITICA">🔴 Crítica — fecha y hora fijas</option>
-          <option value="URGENTE">🟠 Urgente — próximos días</option>
-          <option value="RELEVANTE">🔵 Relevante — esta semana / mes</option>
-          <option value="OPCIONAL">🟢 Opcional — lista de espera</option>
-          <option value="RECORDATORIO">🔔 Recordatorio</option>
+          <option value="CRITICA">Critica — fecha y hora fijas</option>
+          <option value="URGENTE">Urgente — proximos dias</option>
+          <option value="RELEVANTE">Relevante — esta semana / mes</option>
+          <option value="OPCIONAL">Opcional — lista de espera</option>
         </Select>
       </Field>
 
@@ -507,12 +514,15 @@ const CrearEvento: React.FC<{
           </Row>
           <Row>
             <Field label="Hora inicio" labelIcon={<Clock className="h-3.5 w-3.5" />} required>
-              <Input type="time" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
+              <Input type="time" step="300" value={f.timeStart} onChange={(e) => set({ ...f, timeStart: e.target.value })} />
             </Field>
             <Field label="Hora fin" labelIcon={<Clock className="h-3.5 w-3.5" />} required>
-              <Input type="time" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
+              <Input type="time" step="300" value={f.timeEnd} onChange={(e) => set({ ...f, timeEnd: e.target.value })} />
             </Field>
           </Row>
+          {timeOrderError && (
+            <p className="text-xs text-red-500">{timeOrderError}</p>
+          )}
           <Field label="Repetición" labelIcon={<RepeatIcon className="h-3.5 w-3.5" />}>
             <Select value={f.repeat} onChange={(e) => set({ ...f, repeat: e.target.value as RepeatRule })}>
               <option value="NONE">No repetir</option>
@@ -561,7 +571,7 @@ const CrearEvento: React.FC<{
             </>
           )}
           {!hasDuration && (
-            <p className="text-xs text-amber-600">Selecciona al menos 15 minutos de duración.</p>
+            <p className="text-xs text-amber-600">Selecciona al menos 5 minutos de duración.</p>
           )}
         </div>
       )}
