@@ -231,12 +231,21 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
 
   return (
     <div className="space-y-8">
+      {/* ── Nota informativa ── */}
+      <div className="rounded-2xl border border-slate-200/60 bg-slate-50 px-4 py-3">
+        <p className="text-sm text-[var(--muted)]">
+          Los cambios en la configuración se aplican a partir del siguiente evento que se agende.
+          Los eventos ya existentes conservan la configuración con la que fueron creados.
+          Esto puede causar pequeñas inconsistencias si modificas preferencias con eventos activos.
+        </p>
+      </div>
+
       {/* ── Categorías ── */}
       <section className="space-y-3 rounded-3xl border border-slate-200/70 bg-[var(--surface)]/80 p-6 shadow-sm">
         <header className="space-y-1">
           <h2 className="text-lg font-semibold text-[var(--fg)]">Categorias</h2>
           <p className="text-sm text-[var(--muted)]">
-            Define entre 2 y 5 categorias. La primera tiene mayor prioridad. Arrastra o usa las flechas para reordenar.
+            Administra las categorías disponibles al crear eventos. El orden define la prioridad que el solver usará para desempatar.
           </p>
         </header>
         <div className="space-y-2">
