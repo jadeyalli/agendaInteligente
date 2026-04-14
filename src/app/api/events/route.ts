@@ -13,6 +13,8 @@ import { z } from 'zod';
 
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/session';
+import { reservationsRepository } from '@/repositories/reservations.repo';
+import { expandReservations } from '@/services/reservations';
 import {
   buildSchedulingContext,
   isUnsetDate,
@@ -862,6 +864,23 @@ async function detectCriticalConflicts(
     .map((c) => ({ id: c.id, title: c.title, start: c.start as Date, end: c.end as Date }));
 }
 
+/**
+ * Detecta si un rango de tiempo se solapa con alguna reservación activa del usuario.
+ * Retorna las instancias que colisionan.
+ */
+async function detectReservationConflicts(
+  userId: string,
+  start: Date,
+  end: Date,
+): Promise<Array<{ id: string; title: string | null; start: Date; end: Date }>> {
+  const reservations = await reservationsRepository.findByUserId(userId);
+  // Expandir en una ventana amplia alrededor del evento (±7 días)
+  const from = new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const to = new Date(end.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const instances = expandReservations(reservations, from, to);
+  return instances.filter((inst) => inst.start < end && inst.end > start);
+}
+
 /** ================== handlers ================== */
 export async function POST(req: Request) {
   try {
@@ -930,6 +949,29 @@ export async function POST(req: Request) {
                 end: c.end.toISOString(),
               })),
               message: 'Este horario se solapa con eventos críticos existentes.',
+            },
+            { status: 409 },
+          );
+        }
+
+        // Verificar también conflicto con reservaciones
+        const resConflicts = await detectReservationConflicts(
+          user.id,
+          data.start as Date,
+          data.end as Date,
+        );
+        if (resConflicts.length > 0) {
+          return NextResponse.json(
+            {
+              conflict: true,
+              conflictType: 'reservation',
+              conflictingEvents: resConflicts.map((r) => ({
+                id: r.id,
+                title: r.title ?? 'Reservación',
+                start: r.start.toISOString(),
+                end: r.end.toISOString(),
+              })),
+              message: 'Este horario se solapa con una reservación existente.',
             },
             { status: 409 },
           );

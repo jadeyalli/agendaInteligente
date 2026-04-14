@@ -8,7 +8,6 @@ import {
   DEFAULT_USER_SETTINGS,
   mergeUserSettings,
   parseEnabledDaysField,
-  type AvailabilitySlotInput,
   type UserSettingsValues,
 } from '@/lib/user-settings';
 
@@ -18,13 +17,10 @@ import PasswordForm from './PasswordForm';
 import ThemeSelector from './ThemeSelector';
 import CategoriesForm from './CategoriesForm';
 
-async function loadUserSettings(userId: string): Promise<{ settings: UserSettingsValues; slots: AvailabilitySlotInput[] }> {
-  const [record, slotRecords] = await Promise.all([
-    prisma.userSettings.findUnique({ where: { userId } }),
-    prisma.availabilitySlot.findMany({ where: { userId } }),
-  ]);
+async function loadUserSettings(userId: string): Promise<UserSettingsValues> {
+  const record = await prisma.userSettings.findUnique({ where: { userId } });
 
-  const settings = record
+  return record
     ? mergeUserSettings({
         dayStart: record.dayStart,
         dayEnd: record.dayEnd,
@@ -32,20 +28,8 @@ async function loadUserSettings(userId: string): Promise<{ settings: UserSetting
         eventBufferMinutes: record.eventBufferMinutes,
         schedulingLeadMinutes: record.schedulingLeadMinutes,
         timezone: record.timezone,
-        weightStability: record.weightStability,
-        weightUrgency: record.weightUrgency,
-        weightWorkHours: record.weightWorkHours,
-        weightCrossDay: record.weightCrossDay,
       })
     : { ...DEFAULT_USER_SETTINGS };
-
-  const slots: AvailabilitySlotInput[] = slotRecords.map((s) => ({
-    dayOfWeek: s.dayOfWeek,
-    startTime: s.startTime,
-    endTime: s.endTime,
-  }));
-
-  return { settings, slots };
 }
 
 export default async function ProfilePage({
@@ -56,7 +40,7 @@ export default async function ProfilePage({
   const user = await getSessionUser();
   if (!user) redirect('/login');
 
-  const [{ settings, slots }, params] = await Promise.all([
+  const [settings, params] = await Promise.all([
     loadUserSettings(user.id),
     searchParams,
   ]);
@@ -145,7 +129,7 @@ export default async function ProfilePage({
               Horarios, días hábiles y pesos de optimización que usa el motor de agendamiento.
             </p>
           </div>
-          <SettingsForm initialValues={settings} initialSlots={slots} />
+          <SettingsForm initialValues={settings} />
         </section>
 
       </main>

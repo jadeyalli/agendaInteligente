@@ -23,7 +23,6 @@ from solver.models import (
     FlexibleEvent,
     Horizon,
     SolverConfig,
-    StabilityMode,
     WindowType,
     build_horizon,
 )
@@ -66,14 +65,10 @@ def _make_event(
     )
 
 
-def _make_config(
-    stability: StabilityMode = StabilityMode.FLEXIBLE,
-    total_cats: int = 2,
-) -> SolverConfig:
+def _make_config(total_cats: int = 2) -> SolverConfig:
     return SolverConfig(
         buffer_slots=1,
         lead_time_slot=0,
-        stability=stability,
         categories=[],
         total_categories=total_cats,
     )
@@ -242,17 +237,9 @@ class TestFilterByPreference:
 # ---------------------------------------------------------------------------
 
 class TestCalculateCost:
-    def test_flexible_stability_always_zero_total(self):
-        h = _make_horizon()
-        config = _make_config(StabilityMode.FLEXIBLE)
-        ev = _make_event(priority=EventPriority.URGENT, current_start_slot=10)
-        cost = calculate_cost(ev, start_slot=50, now_slot=0, config=config,
-                              preferred_slots=set(), horizon=h)
-        assert cost.total == 0
-
     def test_balanced_total_formula(self):
         h = _make_horizon()
-        config = _make_config(StabilityMode.BALANCED, total_cats=3)
+        config = _make_config(total_cats=3)
         # stability_mult=1, priority_weight=3(urgent), cat_weight=3-1+1=3
         # move = |50 - 10| = 40
         # total = 1 * 3 * 3 * 40 = 360
@@ -261,19 +248,9 @@ class TestCalculateCost:
                               preferred_slots=set(), horizon=h)
         assert cost.total == 360
 
-    def test_fixed_stability_multiplies_by_10(self):
-        h = _make_horizon()
-        config = _make_config(StabilityMode.FIXED, total_cats=2)
-        # stability_mult=10, priority=relevant(1), cat_weight=2-2+1=1, move=5
-        # total = 10 * 1 * 1 * 5 = 50
-        ev = _make_event(priority=EventPriority.RELEVANT, category_rank=2, current_start_slot=0)
-        cost = calculate_cost(ev, start_slot=5, now_slot=0, config=config,
-                              preferred_slots=set(), horizon=h)
-        assert cost.total == 50
-
     def test_no_current_slot_move_is_zero(self):
         h = _make_horizon()
-        config = _make_config(StabilityMode.FIXED)
+        config = _make_config()
         ev = _make_event(current_start_slot=None)
         cost = calculate_cost(ev, start_slot=100, now_slot=0, config=config,
                               preferred_slots=set(), horizon=h)
@@ -305,7 +282,7 @@ class TestGenerateCandidates:
 
     def test_sorted_by_total_cost(self):
         h = _make_horizon(7)
-        config = _make_config(StabilityMode.BALANCED)
+        config = _make_config()
         ev = _make_event(current_start_slot=100, window_type=WindowType.NONE)
         slots, costs = generate_candidates(ev, h, config, [], 0, set(), set(), set(range(7)))
         if len(slots) >= 2:

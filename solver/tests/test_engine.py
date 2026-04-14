@@ -150,13 +150,6 @@ class TestScenario4StabilityFlexible:
         total = len(result["placed"]) + len(result["unplaced"])
         assert total == 4  # 3 movable + 1 new
 
-    def test_flexible_score_is_zero_or_none(self):
-        """En modo flexible stability_mult=0, el score objetivo debe ser 0."""
-        payload = _load("stability_flexible.json")
-        result = solve_schedule(payload)
-        score = result.get("score")
-        # Score puede ser None (greedy) o 0 (CP-SAT con stability=flexible)
-        assert score is None or score == 0
 
 
 # ---------------------------------------------------------------------------
@@ -203,17 +196,6 @@ class TestScenario6StabilityFixed:
         placed_ids = {p["id"] for p in result["placed"]}
         assert len(placed_ids) >= 1
 
-    def test_existing_relevant_not_unnecessarily_moved(self):
-        """
-        En stability=fixed (mult=10), mover el relevant existente cuesta mucho.
-        Con espacio disponible, debe quedarse en su slot original.
-        """
-        payload = _load("stability_fixed.json")
-        result = solve_schedule(payload)
-        moved_ids = {m["id"] for m in result["moved"]}
-        # mov-rel-existing estaba en 2026-10-06T10:00 — no hay conflicto ahí
-        # así que NO debe aparecer en moved
-        assert "mov-rel-existing" not in moved_ids
 
 
 # ---------------------------------------------------------------------------

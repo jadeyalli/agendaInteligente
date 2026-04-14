@@ -147,11 +147,6 @@ async function main(): Promise<void> {
       eventBufferMinutes: 15,
       schedulingLeadMinutes: 10,
       timezone: 'America/Mexico_City',
-      // balanced → weightStability = 2 (mapa: 1=flexible, 2=balanced, 3=fixed)
-      weightStability: 2,
-      weightUrgency: 2,
-      weightWorkHours: 2,
-      weightCrossDay: 2,
       categories: JSON.stringify(['Trabajo', 'Escuela', 'Personal']),
     },
   });
@@ -307,11 +302,6 @@ async function main(): Promise<void> {
       eventBufferMinutes: 10,
       schedulingLeadMinutes: 0,
       timezone: 'America/New_York',
-      // flexible → weightStability = 1 (mapa: 1=flexible, 2=balanced, 3=fixed)
-      weightStability: 1,
-      weightUrgency: 2,
-      weightWorkHours: 2,
-      weightCrossDay: 2,
       categories: JSON.stringify(['Escuela', 'Trabajo', 'Salud']),
     },
   });

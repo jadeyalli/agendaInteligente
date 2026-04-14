@@ -15,7 +15,9 @@ import {
 } from '@/lib/user-settings';
 import { collaborativeRepository } from '@/repositories/collaborative.repo';
 import { eventRepository } from '@/repositories/events.repo';
+import { reservationsRepository } from '@/repositories/reservations.repo';
 import { settingsRepository } from '@/repositories/settings.repo';
+import { expandReservations } from '@/services/reservations';
 
 import { Priority } from '@prisma/client';
 
@@ -88,20 +90,18 @@ function defaultWindowFor(p: Priority): 'PRONTO' | 'SEMANA' | 'MES' {
 
 /**
  * Genera los bloques horarios preferidos dentro del horizonte de planificación.
- * Itera día a día y construye un rango por cada día habilitado usando los
- * slots por día (o el horario global como fallback).
+ * Itera día a día y construye un rango por cada día habilitado usando el horario global.
  */
 function generatePreferredRanges(
   horizonStart: Date,
   horizonEnd: Date,
   settings: UserSettingsValues,
   tz: string,
-  perDaySlots: Map<number, { startTime: string; endTime: string }>,
 ): Array<{ start: string; end: string }> {
   const ranges: Array<{ start: string; end: string }> = [];
   const enabled = new Set<DayCode>(settings.enabledDays);
-  const globalStart = timeStringToParts(settings.dayStart);
-  const globalEnd = timeStringToParts(settings.dayEnd);
+  const { hour: startHour, minute: startMinute } = timeStringToParts(settings.dayStart);
+  const { hour: endHour, minute: endMinute } = timeStringToParts(settings.dayEnd);
 
   const cursor = new Date(horizonStart);
   cursor.setHours(0, 0, 0, 0);
@@ -111,20 +111,11 @@ function generatePreferredRanges(
     const dayCode = JS_DAY_TO_DAY_CODE[jsDay];
 
     if (dayCode && enabled.has(dayCode)) {
-      const slot = perDaySlots.get(jsDay);
-      const { hour: startHour, minute: startMinute } = slot
-        ? timeStringToParts(slot.startTime)
-        : globalStart;
-      const { hour: endHour, minute: endMinute } = slot
-        ? timeStringToParts(slot.endTime)
-        : globalEnd;
-
       const dayStart = new Date(cursor);
       dayStart.setHours(startHour, startMinute, 0, 0);
       let dayEnd = new Date(cursor);
       dayEnd.setHours(endHour, endMinute, 0, 0);
 
-      // Si el horario de fin es anterior al de inicio (mal configurado), usar día completo.
       if (dayEnd <= dayStart) {
         dayStart.setHours(0, 0, 0, 0);
         dayEnd = new Date(cursor);
@@ -185,20 +176,14 @@ export async function buildSolverPayload(
   const horizonStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const horizonEnd = endOfMonth(now);
 
-  const [rawSettings, slotRecords, events, phantomBlocks] = await Promise.all([
+  const [rawSettings, events, phantomBlocks, reservations] = await Promise.all([
     settingsRepository.findByUserId(userId),
-    settingsRepository.findAvailabilitySlots(userId),
     eventRepository.findByUserId(userId),
     collaborativeRepository.findActivePhantomBlocks(userId),
+    reservationsRepository.findByUserId(userId),
   ]);
 
   const tz = rawSettings?.timezone ?? DEFAULT_USER_SETTINGS.timezone;
-
-  // Mapa día-JS → slot de disponibilidad por día
-  const perDaySlots = new Map<number, { startTime: string; endTime: string }>();
-  for (const s of slotRecords) {
-    perDaySlots.set(s.dayOfWeek, { startTime: s.startTime, endTime: s.endTime });
-  }
 
   const settings = mergeUserSettings(
     rawSettings
@@ -209,10 +194,6 @@ export async function buildSolverPayload(
           eventBufferMinutes: rawSettings.eventBufferMinutes,
           schedulingLeadMinutes: rawSettings.schedulingLeadMinutes,
           timezone: rawSettings.timezone,
-          weightStability: rawSettings.weightStability,
-          weightUrgency: rawSettings.weightUrgency,
-          weightWorkHours: rawSettings.weightWorkHours,
-          weightCrossDay: rawSettings.weightCrossDay,
         }
       : null,
   );
@@ -223,14 +204,6 @@ export async function buildSolverPayload(
     name,
     rank,
   }));
-
-  // Estabilidad: weightStability 1→flexible, 2→balanced, 3→fixed
-  const stabilityMap: Record<1 | 2 | 3, 'flexible' | 'balanced' | 'fixed'> = {
-    1: 'flexible',
-    2: 'balanced',
-    3: 'fixed',
-  };
-  const stability = stabilityMap[settings.weightStability];
 
   const fixed: SolverFixedEvent[] = [];
   const movable: SolverFlexibleEvent[] = [];
@@ -314,12 +287,22 @@ export async function buildSolverPayload(
     });
   }
 
+  // Reservaciones (puntuales + recurrentes expandidas) → también bloquean capacidad.
+  const reservationInstances = expandReservations(reservations, horizonStart, horizonEnd);
+  for (const inst of reservationInstances) {
+    fixed.push({
+      id: `reservation_${inst.id}`,
+      start: toLocalISO(inst.start, tz),
+      end: toLocalISO(inst.end, tz),
+      blocksCapacity: true,
+    });
+  }
+
   const preferredRanges = generatePreferredRanges(
     horizonStart,
     horizonEnd,
     settings,
     tz,
-    perDaySlots,
   );
 
   const activeDays = Array.from(
@@ -344,7 +327,6 @@ export async function buildSolverPayload(
       newFixed: [],
     },
     config: {
-      stability,
       categories: categoriesConfig,
       bufferMinutes: settings.eventBufferMinutes,
       leadMinutes: settings.schedulingLeadMinutes,

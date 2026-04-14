@@ -36,12 +36,5 @@ export const PRIORITY_WEIGHTS: Record<string, number> = {
   InU: 1,
 };
 
-/** Multiplicadores de estabilidad en la función objetivo. §4.4 */
-export const STABILITY_MULTIPLIERS: Record<string, number> = {
-  flexible: 0,
-  balanced: 1,
-  fixed: 10,
-};
-
 /** Horas antes del fin de ventana para emitir una alerta. §5.1 */
 export const WINDOW_ALERT_HOURS = 24;

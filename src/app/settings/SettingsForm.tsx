@@ -1,39 +1,196 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import {
   DAY_CODES,
-  DAY_CODE_TO_JS_DAY,
   DAY_LABELS,
   DEFAULT_USER_SETTINGS,
   TIMEZONE_GROUPS,
-  type AvailabilitySlotInput,
   type DayCode,
   type UserSettingsValues,
 } from '@/lib/user-settings';
 
-type SlotMap = Map<number, { startTime: string; endTime: string }>;
+// ─── Reservaciones recurrentes ──────────────────────────────────────────────
 
-function slotsArrayToMap(slots: AvailabilitySlotInput[]): SlotMap {
-  const map: SlotMap = new Map();
-  for (const s of slots) {
-    map.set(s.dayOfWeek, { startTime: s.startTime, endTime: s.endTime });
-  }
-  return map;
+const JS_DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+interface RecurringReservation {
+  id: string;
+  title: string | null;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
 }
 
-function slotsMapToArray(map: SlotMap): AvailabilitySlotInput[] {
-  return Array.from(map.entries()).map(([dayOfWeek, { startTime, endTime }]) => ({
-    dayOfWeek,
-    startTime,
-    endTime,
-  }));
+function RecurringReservationsSection() {
+  const [reservations, setReservations] = useState<RecurringReservation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [form, setForm] = useState({
+    title: '',
+    dayOfWeek: 1,
+    startTime: '09:00',
+    endTime: '10:00',
+  });
+
+  const loadReservations = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reservations?recurring=true');
+      if (!res.ok) return;
+      const data = await res.json() as { reservations: RecurringReservation[] };
+      setReservations(data.reservations ?? []);
+    } catch {
+      // silent
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadReservations(); }, [loadReservations]);
+
+  async function handleAdd() {
+    if (form.endTime <= form.startTime) {
+      setError('La hora de fin debe ser posterior a la hora de inicio.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/reservations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isRecurring: true, ...form, title: form.title || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? 'Error al guardar');
+      }
+      setForm({ title: '', dayOfWeek: 1, startTime: '09:00', endTime: '10:00' });
+      await loadReservations();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await fetch(`/api/reservations/${id}`, { method: 'DELETE' });
+      setReservations((prev) => prev.filter((r) => r.id !== id));
+    } catch {
+      // silent
+    }
+  }
+
+  return (
+    <section className="space-y-3 rounded-3xl border border-slate-200/70 bg-[var(--surface)]/80 p-6 shadow-sm">
+      <header className="space-y-1">
+        <h2 className="text-lg font-semibold text-[var(--fg)]">Reservaciones recurrentes</h2>
+        <p className="text-sm text-[var(--muted)]">
+          Bloquea horarios que se repiten cada semana (reuniones fijas, clases, etc.).
+          El solver no agendará eventos en estos bloques.
+        </p>
+      </header>
+
+      {/* Lista actual */}
+      {!loading && reservations.length > 0 && (
+        <div className="space-y-2">
+          {reservations.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-white/70 px-3 py-2 text-sm"
+            >
+              <span className="w-20 shrink-0 font-medium text-[var(--fg)]">
+                {JS_DAY_LABELS[r.dayOfWeek]}
+              </span>
+              <span className="text-[var(--muted)]">
+                {r.startTime} – {r.endTime}
+              </span>
+              {r.title && (
+                <span className="flex-1 truncate text-[var(--muted)]">{r.title}</span>
+              )}
+              <button
+                type="button"
+                onClick={() => handleDelete(r.id)}
+                className="ml-auto rounded px-2 py-0.5 text-xs text-rose-500 hover:bg-rose-50"
+              >
+                Eliminar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && reservations.length === 0 && (
+        <p className="text-sm text-[var(--muted)]">Sin reservaciones recurrentes.</p>
+      )}
+
+      {/* Formulario para agregar */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-[var(--fg)]">Día</span>
+          <select
+            value={form.dayOfWeek}
+            onChange={(e) => setForm((p) => ({ ...p, dayOfWeek: Number(e.target.value) }))}
+            className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+          >
+            {JS_DAY_LABELS.map((label, i) => (
+              <option key={i} value={i}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-[var(--fg)]">Título (opcional)</span>
+          <input
+            type="text"
+            value={form.title}
+            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+            placeholder="Ej. Reunión semanal"
+            maxLength={100}
+            className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-[var(--fg)]">Hora inicio</span>
+          <input
+            type="time"
+            value={form.startTime}
+            onChange={(e) => setForm((p) => ({ ...p, startTime: e.target.value }))}
+            className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-[var(--fg)]">Hora fin</span>
+          <input
+            type="time"
+            value={form.endTime}
+            onChange={(e) => setForm((p) => ({ ...p, endTime: e.target.value }))}
+            className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+          />
+        </label>
+      </div>
+
+      {error && <p className="text-xs text-rose-600">{error}</p>}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleAdd}
+          disabled={saving}
+          className="inline-flex items-center rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
+        >
+          {saving ? 'Guardando…' : 'Agregar reservación'}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 type SettingsFormProps = {
   initialValues: UserSettingsValues;
-  initialSlots: AvailabilitySlotInput[];
 };
 
 function clampBufferMinutes(value: string, fallback: number): number {
@@ -46,9 +203,8 @@ function clampBufferMinutes(value: string, fallback: number): number {
 
 const DEFAULT_CATEGORIES = ['Trabajo', 'Escuela', 'Personal'];
 
-export default function SettingsForm({ initialValues, initialSlots }: SettingsFormProps) {
+export default function SettingsForm({ initialValues }: SettingsFormProps) {
   const [form, setForm] = useState<UserSettingsValues>(initialValues);
-  const [slots, setSlots] = useState<SlotMap>(() => slotsArrayToMap(initialSlots));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,13 +297,6 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
           return prev; // al menos un día debe quedar habilitado
         }
         current.delete(code);
-        // Remove custom slot for disabled day
-        const jsDay = DAY_CODE_TO_JS_DAY[code];
-        setSlots((prev) => {
-          const next = new Map(prev);
-          next.delete(jsDay);
-          return next;
-        });
       } else {
         current.add(code);
       }
@@ -165,7 +314,7 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
       const res = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, availabilitySlots: slotsMapToArray(slots) }),
+        body: JSON.stringify(form),
       });
       if (res.status === 401) {
         window.location.href = '/login';
@@ -175,12 +324,8 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo guardar');
       }
-      const data = (await res.json()) as UserSettingsValues & { availabilitySlots?: AvailabilitySlotInput[] };
-      const { availabilitySlots: returnedSlots, ...settingsData } = data;
-      setForm(settingsData);
-      if (returnedSlots) {
-        setSlots(slotsArrayToMap(returnedSlots));
-      }
+      const data = (await res.json()) as UserSettingsValues;
+      setForm(data);
       setMessage('Preferencias guardadas correctamente.');
       setSavedOnce(true);
       setReoptStatus('idle');
@@ -298,24 +443,24 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
         </div>
       </section>
 
+    <RecurringReservationsSection />
+
     <form
       onSubmit={handleSubmit}
       className="space-y-8 rounded-3xl border border-slate-200/70 bg-[var(--surface)]/80 p-6 shadow-sm"
     >
-      {/* Horario del día — solo visual */}
+      {/* Dias y horarios habilitados */}
       <section className="space-y-3">
         <header className="space-y-1">
-          <h2 className="text-lg font-semibold text-[var(--fg)]">Horario del dia (solo vista)</h2>
+          <h2 className="text-lg font-semibold text-[var(--fg)]">Dias y horarios habilitados</h2>
           <p className="text-sm text-[var(--muted)]">
-            Define el rango horario que se mostrara destacado en el calendario.
-          </p>
-          <p className="text-xs text-amber-600">
-            Este horario solo afecta la vista del calendario, no el agendamiento automatico.
+            Define el horario y los dias que el sistema usara para agendar eventos automaticamente
+            y para mostrar el calendario.
           </p>
         </header>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-[var(--fg)]">Inicio del día</span>
+            <span className="text-sm font-medium text-[var(--fg)]">Inicio del dia</span>
             <input
               type="time"
               value={form.dayStart}
@@ -324,7 +469,7 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
             />
           </label>
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-[var(--fg)]">Fin del día</span>
+            <span className="text-sm font-medium text-[var(--fg)]">Fin del dia</span>
             <input
               type="time"
               value={form.dayEnd}
@@ -336,23 +481,10 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
         {timeRangeError && (
           <p className="text-xs text-rose-600">{timeRangeError}</p>
         )}
-      </section>
-
-      {/* Días habilitados */}
-      <section className="space-y-3">
-        <header className="space-y-1">
-          <h2 className="text-lg font-semibold text-[var(--fg)]">Días habilitados</h2>
-          <p className="text-sm text-[var(--muted)]">
-            Selecciona los días que se considerarán para agendar automáticamente.
-            Puedes personalizar el horario preferido para cada día.
-          </p>
-        </header>
+        <p className="text-sm font-medium text-[var(--fg)]">Dias activos</p>
         <div className="grid gap-2">
           {DAY_CODES.map((code) => {
-            const jsDay = DAY_CODE_TO_JS_DAY[code];
             const isEnabled = enabledSet.has(code);
-            const customSlot = slots.get(jsDay);
-            const hasCustom = !!customSlot;
 
             return (
               <div
@@ -368,72 +500,11 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
                   />
                   <span className="text-sm font-medium text-[var(--fg)]">{DAY_LABELS[code]}</span>
                   {isEnabled && (
-                    <button
-                      type="button"
-                      className={`ml-auto text-xs transition ${
-                        hasCustom
-                          ? 'font-medium text-indigo-600 hover:text-indigo-700'
-                          : 'text-[var(--muted)] hover:text-[var(--fg)]'
-                      }`}
-                      onClick={() => {
-                        setSlots((prev) => {
-                          const next = new Map(prev);
-                          if (next.has(jsDay)) {
-                            next.delete(jsDay);
-                          } else {
-                            next.set(jsDay, { startTime: form.dayStart, endTime: form.dayEnd });
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      {hasCustom ? 'Quitar horario personalizado' : 'Personalizar horario'}
-                    </button>
+                    <span className="ml-auto text-xs text-[var(--muted)]">
+                      {form.dayStart} - {form.dayEnd}
+                    </span>
                   )}
                 </div>
-                {isEnabled && hasCustom && (
-                  <div className="mt-2 flex items-center gap-2 pl-7">
-                    <input
-                      type="time"
-                      value={customSlot.startTime}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (!val) return;
-                        setSlots((prev) => {
-                          const next = new Map(prev);
-                          const current = next.get(jsDay)!;
-                          next.set(jsDay, { ...current, startTime: val });
-                          return next;
-                        });
-                      }}
-                      className="rounded-lg border border-slate-200/70 bg-white/80 px-2 py-1 text-xs text-[var(--fg)] shadow-inner focus:border-indigo-400 focus:outline-none"
-                    />
-                    <span className="text-xs text-[var(--muted)]">a</span>
-                    <input
-                      type="time"
-                      value={customSlot.endTime}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (!val) return;
-                        setSlots((prev) => {
-                          const next = new Map(prev);
-                          const current = next.get(jsDay)!;
-                          next.set(jsDay, { ...current, endTime: val });
-                          return next;
-                        });
-                      }}
-                      className="rounded-lg border border-slate-200/70 bg-white/80 px-2 py-1 text-xs text-[var(--fg)] shadow-inner focus:border-indigo-400 focus:outline-none"
-                    />
-                    {customSlot.endTime <= customSlot.startTime && (
-                      <span className="text-xs text-rose-600">Fin debe ser posterior a inicio</span>
-                    )}
-                  </div>
-                )}
-                {isEnabled && !hasCustom && (
-                  <p className="mt-1 pl-7 text-xs text-[var(--muted)]">
-                    Horario global: {form.dayStart} - {form.dayEnd}
-                  </p>
-                )}
               </div>
             );
           })}
@@ -511,54 +582,6 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
         </div>
       </section>
 
-      {/* Preferencias del solver */}
-      <section className="space-y-5">
-        <header className="space-y-1">
-          <h2 className="text-lg font-semibold text-[var(--fg)]">Preferencias del solver</h2>
-          <p className="text-sm text-[var(--muted)]">
-            Indica cómo debe comportarse la optimización automática de tu agenda.
-          </p>
-        </header>
-
-        {/* Estabilidad de eventos */}
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-[var(--fg)]">Estabilidad de eventos</p>
-          <p className="text-xs text-[var(--muted)]">
-            ¿Con qué frecuencia puede el solver mover tus eventos ya agendados?
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                [1, 'Flexible', 'Puede moverlos libremente'],
-                [2, 'Balanceado', 'Solo si es necesario'],
-                [3, 'Fijo', 'Evita moverlos al máximo'],
-              ] as const
-            ).map(([level, label, desc]) => (
-              <label
-                key={level}
-                className={`flex cursor-pointer flex-col gap-0.5 rounded-2xl border px-3 py-2.5 text-sm transition hover:-translate-y-0.5 ${
-                  form.weightStability === level
-                    ? 'border-indigo-400 bg-indigo-50/70 text-indigo-700'
-                    : 'border-slate-200/70 bg-white/70 text-[var(--fg)]'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="weightStability"
-                  value={level}
-                  checked={form.weightStability === level}
-                  onChange={() => setForm((prev) => ({ ...prev, weightStability: level }))}
-                  className="sr-only"
-                />
-                <span className="font-medium">{label}</span>
-                <span className="text-xs text-[var(--muted)]">{desc}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-      </section>
-
       {(message || error) && (
         <div
           className={`rounded-2xl border px-4 py-3 text-sm ${
@@ -612,7 +635,6 @@ export default function SettingsForm({ initialValues, initialSlots }: SettingsFo
               ...DEFAULT_USER_SETTINGS,
               enabledDays: [...DEFAULT_USER_SETTINGS.enabledDays],
             });
-            setSlots(new Map());
           }}
         >
           Restaurar valores por defecto

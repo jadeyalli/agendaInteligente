@@ -18,13 +18,6 @@ class EventPriority(str, Enum):
     RELEVANT = "InU"
 
 
-class StabilityMode(str, Enum):
-    """Modo de estabilidad del solver: cuánto se penaliza mover eventos."""
-    FLEXIBLE = "flexible"
-    BALANCED = "balanced"
-    FIXED = "fixed"
-
-
 class WindowType(str, Enum):
     """Tipo de ventana de disponibilidad de un evento."""
     PRONTO = "PRONTO"
@@ -159,7 +152,6 @@ class SolverConfig:
     """Configuración global del solver."""
     buffer_slots: int
     lead_time_slot: int  # primer slot válido (now + lead_time)
-    stability: StabilityMode
     categories: List[CategoryInfo]
     total_categories: int
     timeout_seconds: float = 5.0

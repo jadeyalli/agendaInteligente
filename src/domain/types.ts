@@ -9,9 +9,6 @@ export type EventPriority = 'CRITICA' | 'URGENTE' | 'RELEVANTE' | 'OPCIONAL' | '
 /** Código de prioridad que entiende el solver Python (UnI = Urgente, InU = Relevante). */
 export type SolverPriority = 'UnI' | 'InU';
 
-/** Modo de estabilidad del solver: cuánto se penaliza mover eventos existentes. */
-export type StabilityMode = 'flexible' | 'balanced' | 'fixed';
-
 /** Tipo de ventana de disponibilidad para eventos flexibles. */
 export type AvailabilityWindowType = 'PRONTO' | 'SEMANA' | 'MES' | 'RANGO' | 'NONE';
 
@@ -23,7 +20,6 @@ export interface CategoryWithRank {
 
 /** Configuración global que se envía al solver Python. */
 export interface SolverPayloadConfig {
-  stability: StabilityMode;
   categories: CategoryWithRank[];
   bufferMinutes: number;
   leadMinutes: number;

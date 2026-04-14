@@ -48,7 +48,10 @@
       "Bash(npx next:*)",
       "Bash(python3 -c \":*)",
       "Bash(git stash:*)",
-      "Bash(python -m pytest solver/tests/test_engine.py::TestScenario6StabilityFixed -v)"
+      "Bash(python -m pytest solver/tests/test_engine.py::TestScenario6StabilityFixed -v)",
+      "Bash(wc -l /c/Users/jadey/proyecto-final/agenda-inteligente/solver/*.py /c/Users/jadey/proyecto-final/agenda-inteligente/src/**/*.ts)",
+      "Bash(set PRISMA_MIGRATE_SKIP_INTERACTIVE=1)",
+      "Bash(powershell -Command \"Write-Output 'y' | npx prisma migrate dev --name remove_stability_modes\")"
     ]
   }
 }

@@ -10,10 +10,8 @@ import {
   parseEnabledDaysField,
   sanitizeBufferMinutes,
   sanitizeDayCodes,
-
   sanitizeTimeString,
   sanitizeTimezone,
-  sanitizeWeightLevel,
   serializeEnabledDays,
   sanitizeAvailabilitySlots,
   type AvailabilitySlotInput,
@@ -28,10 +26,6 @@ function formatSettings(record?: {
   eventBufferMinutes: number;
   schedulingLeadMinutes: number;
   timezone: string;
-  weightStability: number;
-  weightUrgency: number;
-  weightWorkHours: number;
-  weightCrossDay: number;
 } | null): UserSettingsValues {
   if (!record) {
     return { ...DEFAULT_USER_SETTINGS };
@@ -50,10 +44,6 @@ function formatSettings(record?: {
       DEFAULT_USER_SETTINGS.schedulingLeadMinutes,
     ),
     timezone: sanitizeTimezone(record.timezone, DEFAULT_USER_SETTINGS.timezone),
-    weightStability: sanitizeWeightLevel(record.weightStability, DEFAULT_USER_SETTINGS.weightStability),
-    weightUrgency: sanitizeWeightLevel(record.weightUrgency, DEFAULT_USER_SETTINGS.weightUrgency),
-    weightWorkHours: sanitizeWeightLevel(record.weightWorkHours, DEFAULT_USER_SETTINGS.weightWorkHours),
-    weightCrossDay: sanitizeWeightLevel(record.weightCrossDay, DEFAULT_USER_SETTINGS.weightCrossDay),
   };
 }
 
@@ -83,10 +73,6 @@ type IncomingSettings = {
   eventBufferMinutes?: number;
   schedulingLeadMinutes?: number;
   timezone?: string;
-  weightStability?: number;
-  weightUrgency?: number;
-  weightWorkHours?: number;
-  weightCrossDay?: number;
   availabilitySlots?: AvailabilitySlotInput[];
 };
 
@@ -123,22 +109,6 @@ export async function PATCH(req: Request) {
     body.timezone !== undefined
       ? sanitizeTimezone(body.timezone, base.timezone)
       : base.timezone;
-  const weightStability =
-    body.weightStability !== undefined
-      ? sanitizeWeightLevel(body.weightStability, base.weightStability)
-      : base.weightStability;
-  const weightUrgency =
-    body.weightUrgency !== undefined
-      ? sanitizeWeightLevel(body.weightUrgency, base.weightUrgency)
-      : base.weightUrgency;
-  const weightWorkHours =
-    body.weightWorkHours !== undefined
-      ? sanitizeWeightLevel(body.weightWorkHours, base.weightWorkHours)
-      : base.weightWorkHours;
-  const weightCrossDay =
-    body.weightCrossDay !== undefined
-      ? sanitizeWeightLevel(body.weightCrossDay, base.weightCrossDay)
-      : base.weightCrossDay;
 
   const updatePayload = {
     dayStart,
@@ -147,13 +117,8 @@ export async function PATCH(req: Request) {
     eventBufferMinutes,
     schedulingLeadMinutes,
     timezone,
-    weightStability,
-    weightUrgency,
-    weightWorkHours,
-    weightCrossDay,
   };
 
-  // Build availability slots if provided
   const sanitizedSlots = body.availabilitySlots !== undefined
     ? sanitizeAvailabilitySlots(body.availabilitySlots, enabledDays)
     : null;
@@ -196,10 +161,6 @@ export async function PATCH(req: Request) {
     eventBufferMinutes: record!.eventBufferMinutes,
     schedulingLeadMinutes: record!.schedulingLeadMinutes,
     timezone: record!.timezone,
-    weightStability: record!.weightStability,
-    weightUrgency: record!.weightUrgency,
-    weightWorkHours: record!.weightWorkHours,
-    weightCrossDay: record!.weightCrossDay,
   });
 
   const availabilitySlots: AvailabilitySlotInput[] = savedSlots.map((s) => ({

@@ -7,10 +7,6 @@ export interface UserSettingsValues {
   eventBufferMinutes: number;
   schedulingLeadMinutes: number;
   timezone: string;
-  weightStability: 1 | 2 | 3;
-  weightUrgency: 1 | 2 | 3;
-  weightWorkHours: 1 | 2 | 3;
-  weightCrossDay: 1 | 2 | 3;
 }
 
 export const DAY_CODES: DayCode[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -55,10 +51,6 @@ export const DEFAULT_USER_SETTINGS: UserSettingsValues = {
   eventBufferMinutes: 0,
   schedulingLeadMinutes: 0,
   timezone: 'America/Mexico_City',
-  weightStability: 2,
-  weightUrgency: 2,
-  weightWorkHours: 2,
-  weightCrossDay: 2,
 };
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -100,12 +92,6 @@ export function sanitizeTimezone(value: unknown, fallback: string): string {
   }
 }
 
-export function sanitizeWeightLevel(value: unknown, fallback: 1 | 2 | 3): 1 | 2 | 3 {
-  const num = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  if (num === 1 || num === 2 || num === 3) return num;
-  return fallback;
-}
-
 export function sanitizeDayCodes(value: unknown, fallback: DayCode[]): DayCode[] {
   if (!Array.isArray(value)) {
     return fallback;
@@ -144,17 +130,7 @@ export function serializeEnabledDays(days: DayCode[]): string {
   return JSON.stringify(ordered);
 }
 
-type MergeInput = Omit<
-  Partial<UserSettingsValues>,
-  'weightStability' | 'weightUrgency' | 'weightWorkHours' | 'weightCrossDay'
-> & {
-  weightStability?: number;
-  weightUrgency?: number;
-  weightWorkHours?: number;
-  weightCrossDay?: number;
-};
-
-export function mergeUserSettings(partial?: MergeInput | null): UserSettingsValues {
+export function mergeUserSettings(partial?: Partial<UserSettingsValues> | null): UserSettingsValues {
   if (!partial) {
     return { ...DEFAULT_USER_SETTINGS };
   }
@@ -171,10 +147,6 @@ export function mergeUserSettings(partial?: MergeInput | null): UserSettingsValu
       DEFAULT_USER_SETTINGS.schedulingLeadMinutes,
     ),
     timezone: sanitizeTimezone(partial.timezone, DEFAULT_USER_SETTINGS.timezone),
-    weightStability: sanitizeWeightLevel(partial.weightStability, DEFAULT_USER_SETTINGS.weightStability),
-    weightUrgency: sanitizeWeightLevel(partial.weightUrgency, DEFAULT_USER_SETTINGS.weightUrgency),
-    weightWorkHours: sanitizeWeightLevel(partial.weightWorkHours, DEFAULT_USER_SETTINGS.weightWorkHours),
-    weightCrossDay: sanitizeWeightLevel(partial.weightCrossDay, DEFAULT_USER_SETTINGS.weightCrossDay),
   };
 }
 
@@ -194,50 +166,6 @@ export function hhmmToFullCalendar(value: string): string {
 
 export function dayCodesToWeekdayIndexes(days: DayCode[]): number[] {
   return days.map((code) => DAY_CODE_TO_WEEKDAY_INDEX[code]).filter((n) => typeof n === 'number');
-}
-
-// ———————————— Solver weight conversion ————————————
-
-export type SolverWeights = {
-  move: { UnI: number; InU: number };
-  distancePerSlot: { UnI: number; InU: number };
-  offPreferencePerSlot: { UnI: number; InU: number };
-  crossDayPerEvent: { UnI: number; InU: number };
-};
-
-const WEIGHT_STABILITY_MAP: Record<1 | 2 | 3, { UnI: number; InU: number }> = {
-  1: { UnI: 5, InU: 5 },
-  2: { UnI: 20, InU: 10 },
-  3: { UnI: 50, InU: 25 },
-};
-
-const WEIGHT_URGENCY_MAP: Record<1 | 2 | 3, { UnI: number; InU: number }> = {
-  1: { UnI: 1, InU: 0 },
-  2: { UnI: 4, InU: 1 },
-  3: { UnI: 8, InU: 3 },
-};
-
-const WEIGHT_WORKHOURS_MAP: Record<1 | 2 | 3, { UnI: number; InU: number }> = {
-  1: { UnI: 0, InU: 1 },
-  2: { UnI: 1, InU: 3 },
-  3: { UnI: 3, InU: 8 },
-};
-
-const WEIGHT_CROSSDAY_MAP: Record<1 | 2 | 3, { UnI: number; InU: number }> = {
-  1: { UnI: 0, InU: 0 },
-  2: { UnI: 2, InU: 1 },
-  3: { UnI: 5, InU: 3 },
-};
-
-export function levelsToWeights(
-  settings: Pick<UserSettingsValues, 'weightStability' | 'weightUrgency' | 'weightWorkHours' | 'weightCrossDay'>,
-): SolverWeights {
-  return {
-    move: WEIGHT_STABILITY_MAP[settings.weightStability],
-    distancePerSlot: WEIGHT_URGENCY_MAP[settings.weightUrgency],
-    offPreferencePerSlot: WEIGHT_WORKHOURS_MAP[settings.weightWorkHours],
-    crossDayPerEvent: WEIGHT_CROSSDAY_MAP[settings.weightCrossDay],
-  };
 }
 
 // ———————————— Availability slots per day ————————————

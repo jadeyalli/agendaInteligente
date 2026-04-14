@@ -431,6 +431,29 @@ body {
   filter: brightness(1.05);
 }
 
+/* ===== Reservaciones (bloques bloqueados) ===== */
+.fc .fc-event.reservation-block {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(100, 116, 139, 0.18),
+    rgba(100, 116, 139, 0.18) 4px,
+    rgba(241, 245, 249, 0.6) 4px,
+    rgba(241, 245, 249, 0.6) 8px
+  ) !important;
+  border: 1.5px solid rgb(148 163 184 / 0.7) !important;
+  border-radius: 0.375rem !important;
+  color: rgb(71 85 105) !important;
+  pointer-events: auto;
+  cursor: default;
+}
+.fc .fc-event.reservation-block .fc-event-title {
+  font-size: 0.7rem;
+  font-style: italic;
+}
+.fc .fc-event.reservation-block:hover {
+  filter: brightness(0.97);
+}
+
 /* ===== Eventos completados ===== */
 .fc .fc-event.event-completed {
   opacity: 0.45 !important;

@@ -62,7 +62,6 @@ from .models import (
     SolverConfig,
     SolverDiagnostics,
     SolverResult,
-    StabilityMode,
     UnplacedEvent,
     WindowType,
     build_horizon,
@@ -328,7 +327,6 @@ def _parse_config(
     Returns:
         Tupla (SolverConfig, working_slots, allowed_days, now_slot).
     """
-    stability = StabilityMode(config_json.get("stability", "balanced"))
     categories_raw = config_json.get("categories", [])
     categories = [CategoryInfo(name=c["name"], rank=c["rank"]) for c in categories_raw]
     total_categories = max(len(categories), 1)
@@ -369,7 +367,6 @@ def _parse_config(
     config = SolverConfig(
         buffer_slots=buffer_slots,
         lead_time_slot=now_slot,
-        stability=stability,
         categories=categories,
         total_categories=total_categories,
     )

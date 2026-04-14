@@ -11,8 +11,8 @@ interface Props {
 }
 
 /**
- * Modal para crear un bloque fantasma manual (reservar espacio en la agenda).
- * El bloque bloquea capacidad para el solver sin crear un evento real.
+ * Modal para crear una reservación puntual (reservar espacio en la agenda).
+ * La reservación bloquea capacidad para el solver sin crear un evento real.
  */
 export default function ReserveSpaceModal({ open, onClose, onCreated }: Props) {
   const [date, setDate] = useState('');
@@ -50,10 +50,16 @@ export default function ReserveSpaceModal({ open, onClose, onCreated }: Props) {
     try {
       const start = new Date(`${date}T${timeStart}`);
       const end = new Date(`${date}T${timeEnd}`);
-      const res = await fetch('/api/collaborative/phantom', {
+      const res = await fetch('/api/reservations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start, end, title: title.trim() || undefined, reason: reason.trim() || undefined }),
+        body: JSON.stringify({
+          isRecurring: false,
+          start,
+          end,
+          title: title.trim() || undefined,
+          description: reason.trim() || undefined,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
@@ -102,7 +108,7 @@ export default function ReserveSpaceModal({ open, onClose, onCreated }: Props) {
 
             <div className="space-y-4 px-5 py-5">
               <p className="text-xs text-slate-500">
-                Reserva un bloque de tiempo en tu agenda. El solver lo tratará como ocupado y no agendará otros eventos encima.
+                Reserva un bloque de tiempo puntual en tu agenda. El solver lo tratará como ocupado y no agendará otros eventos encima.
               </p>
 
               <div className="space-y-1.5">

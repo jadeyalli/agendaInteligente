@@ -15,16 +15,8 @@ from .models import (
     FlexibleEvent,
     Horizon,
     SolverConfig,
-    StabilityMode,
     WindowType,
 )
-
-# Multiplicadores de estabilidad según el modelo formal (sección 4.4 del doc técnico v3)
-_STABILITY_MULTIPLIER: Dict[StabilityMode, int] = {
-    StabilityMode.FLEXIBLE: 0,
-    StabilityMode.BALANCED: 1,
-    StabilityMode.FIXED: 10,
-}
 
 # Pesos por prioridad según el modelo formal (sección 4.4 del doc técnico v3)
 _PRIORITY_WEIGHT: Dict[EventPriority, int] = {
@@ -264,7 +256,7 @@ def calculate_cost(
     Returns:
         CandidateCost con el desglose de todos los componentes de costo.
     """
-    stability_mult = _STABILITY_MULTIPLIER[config.stability]
+    stability_mult = 1  # solo modo balanceado
     priority_weight = _PRIORITY_WEIGHT[event.priority]
     cat_weight = config.total_categories - event.category_rank + 1
 

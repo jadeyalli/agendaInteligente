@@ -9,10 +9,9 @@ import interactionPlugin from '@fullcalendar/interaction';
 import multiMonthPlugin from '@fullcalendar/multimonth';
 import esLocale from '@fullcalendar/core/locales/es';
 
-import { CalendarX2, Download } from 'lucide-react';
+import { CalendarX2 } from 'lucide-react';
 
 import CreateEditModal, { type CreateModalSubmitPayload } from '@/components/create/Modal';
-import IcsImportModal from '@/components/ics/IcsImportModal';
 import EventPreviewModal, { type EventRow as PreviewRow } from '@/components/EventPreviewModal';
 import OptionalEventsPanel from '@/components/OptionalEventsPanel';
 import AvailableSlots, { type AvailableSlot } from '@/components/AvailableSlots';
@@ -110,7 +109,6 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   const browserTimeZone = useMemo(() => resolveBrowserTimezone(), []);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const [openImport, setOpenImport] = useState(false);
   // Estado para conflictos de eventos críticos
   const [criticalConflict, setCriticalConflict] = useState<{
     pendingPayload: CreateModalSubmitPayload;
@@ -148,6 +146,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   }, [selected, rows]);
   const [loading, setLoading] = useState(false);
   const [phantomBlocks, setPhantomBlocks] = useState<Array<{ id: string; collabEventId?: string | null; start: string; end: string; title?: string | null }>>([]);
+  const [reservations, setReservations] = useState<Array<{ id: string; title: string | null; start: string | null; end: string | null; isRecurring: boolean; dayOfWeek: number | null; startTime: string | null; endTime: string | null }>>([]);
   const [openReserveSpace, setOpenReserveSpace] = useState(false);
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
   const [enabledDayCodes, setEnabledDayCodes] = useState<DayCode[]>(
@@ -204,6 +203,7 @@ export default function Calendar({ onViewChange }: CalendarProps) {
   useEffect(() => {
     loadEvents();
     loadPhantomBlocks();
+    loadReservations();
     fetch('/api/auth/me')
       .then((r) => r.ok ? r.json() : null)
       .then((data: { id?: string } | null) => { if (data?.id) setCurrentUserId(data.id); })
@@ -218,6 +218,17 @@ export default function Calendar({ onViewChange }: CalendarProps) {
       setPhantomBlocks(Array.isArray(data) ? data : []);
     } catch {
       // fallo silencioso — los bloques fantasma son auxiliares
+    }
+  }
+
+  async function loadReservations() {
+    try {
+      const res = await fetch('/api/reservations', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json() as { reservations: typeof reservations };
+      setReservations(data.reservations ?? []);
+    } catch {
+      // fallo silencioso
     }
   }
 
@@ -856,26 +867,6 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
   };
 }
   // ====== Mapeo a FullCalendar con colores del tema ======
-  /** Calcula cuántos eventos del día tienen hora fuera del rango visible (dayStart–dayEnd). */
-  const hiddenEventsByDay = useMemo<Map<string, number>>(() => {
-    const map = new Map<string, number>();
-    const [startH, startM] = userDayStart.split(':').map(Number);
-    const [endH, endM] = userDayEnd.split(':').map(Number);
-    const startTotal = startH * 60 + startM;
-    const endTotal = endH * 60 + endM;
-
-    for (const row of rows) {
-      if (!row.start || row.status === 'WAITLIST' || row.isAllDay) continue;
-      const d = new Date(row.start);
-      const eventMinutes = d.getHours() * 60 + d.getMinutes();
-      if (eventMinutes < startTotal || eventMinutes >= endTotal) {
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        map.set(key, (map.get(key) ?? 0) + 1);
-      }
-    }
-    return map;
-  }, [rows, userDayStart, userDayEnd]);
-
   const fcEvents = useMemo<EventInput[]>(() => {
     const out: EventInput[] = [];
 
@@ -1055,8 +1046,51 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
       });
     }
 
+    // Reservaciones puntuales → bloques de fondo con patrón rayado
+    for (const r of reservations) {
+      if (!r.isRecurring && r.start && r.end) {
+        out.push({
+          id: `reservation_onetime_${r.id}`,
+          title: r.title ?? 'Reservación',
+          start: r.start,
+          end: r.end,
+          classNames: ['reservation-block'],
+          editable: false,
+          extendedProps: { isReservation: true, reservationId: r.id },
+        });
+      }
+      // Recurrentes: FullCalendar no soporta reglas de recurrencia por dayOfWeek directamente,
+      // así que las expandimos para el rango visible
+      if (r.isRecurring && r.dayOfWeek != null && r.startTime && r.endTime && visibleRange) {
+        const cursor = new Date(visibleRange.start);
+        cursor.setHours(0, 0, 0, 0);
+        const [sh, sm] = r.startTime.split(':').map(Number);
+        const [eh, em] = r.endTime.split(':').map(Number);
+        while (cursor <= visibleRange.end) {
+          if (cursor.getDay() === r.dayOfWeek) {
+            const start = new Date(cursor);
+            start.setHours(sh ?? 0, sm ?? 0, 0, 0);
+            const end = new Date(cursor);
+            end.setHours(eh ?? 0, em ?? 0, 0, 0);
+            if (end <= start) end.setDate(end.getDate() + 1);
+            const dateKey = cursor.toISOString().slice(0, 10);
+            out.push({
+              id: `reservation_rec_${r.id}_${dateKey}`,
+              title: r.title ?? 'Reservación',
+              start: start.toISOString(),
+              end: end.toISOString(),
+              classNames: ['reservation-block'],
+              editable: false,
+              extendedProps: { isReservation: true, reservationId: r.id },
+            });
+          }
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      }
+    }
+
     return out;
-  }, [rows, visibleRange, theme, disabledJsDayIndexes, phantomBlocks, showCompleted]);
+  }, [rows, visibleRange, theme, disabledJsDayIndexes, phantomBlocks, reservations, showCompleted]);
 
   // Navegación
   const changeView = (v: ViewId) => {
@@ -1204,21 +1238,6 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
             >
               Colaborativos
             </button>
-            <button
-              className="inline-flex items-center rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
-              onClick={() => setOpenImport(true)}
-              type="button"
-            >
-              Importar .ICS
-            </button>
-            <a
-              href="/api/export-ics"
-              download
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/70 bg-white/70 px-5 py-2 text-sm font-semibold text-[var(--fg)] shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Exportar .ICS
-            </a>
           </div>
         </div>
       </header>
@@ -1272,21 +1291,9 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
                   }}
                   dayHeaderFormat={{ weekday: 'short', day: 'numeric' }}
                   dayHeaderContent={(arg) => {
-                    const d = arg.date;
-                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                    const hidden = hiddenEventsByDay.get(key) ?? 0;
                     return (
                       <div className="flex flex-col items-center gap-0.5">
                         <span>{arg.text}</span>
-                        {hidden > 0 && (
-                          <button
-                            type="button"
-                            className="text-[10px] text-[var(--muted)] underline hover:text-[var(--fg)]"
-                            onClick={(e) => { e.stopPropagation(); handleOpenDayActions(d); }}
-                          >
-                            {hidden} evento{hidden > 1 ? 's' : ''} fuera del horario visible
-                          </button>
-                        )}
                       </div>
                     );
                   }}
@@ -1546,12 +1553,6 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
         }}
       />
 
-      <IcsImportModal
-        open={openImport}
-        onClose={() => setOpenImport(false)}
-        onImported={async () => { await loadEvents(); }}
-      />
-
       {/* Modal lista del día */}
       <DayActionsModal
         isOpen={openDayActions}
@@ -1679,7 +1680,7 @@ function mapWaitlistRowToCreateInitial(row: EventRow, timeZone: string): ModalIn
       <ReserveSpaceModal
         open={openReserveSpace}
         onClose={() => setOpenReserveSpace(false)}
-        onCreated={() => { setOpenReserveSpace(false); loadPhantomBlocks(); }}
+        onCreated={() => { setOpenReserveSpace(false); loadReservations(); }}
       />
     </div>
   );

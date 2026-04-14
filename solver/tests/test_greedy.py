@@ -14,7 +14,6 @@ from solver.models import (
     FlexibleEvent,
     Horizon,
     SolverConfig,
-    StabilityMode,
     WindowType,
     build_horizon,
 )
@@ -58,11 +57,10 @@ def _make_fixed(id: str, start_slot: int, end_slot: int, blocks: bool = True) ->
     return FixedEvent(id=id, start_slot=start_slot, end_slot=end_slot, blocks_capacity=blocks)
 
 
-def _make_config(stability: StabilityMode = StabilityMode.FLEXIBLE, total_cats: int = 2) -> SolverConfig:
+def _make_config(total_cats: int = 2) -> SolverConfig:
     return SolverConfig(
         buffer_slots=1,
         lead_time_slot=0,
-        stability=stability,
         categories=[],
         total_categories=total_cats,
     )
